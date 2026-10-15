@@ -1,10 +1,12 @@
-# ntcharts-pdf .gitignore
+# ntpdf .gitignore
 
 .task
 .DS_Store
 bin/
+web/demos/
 web/app.wasm
 web/wasm_exec.js
 web/booba/
 web/ghostty-web/
 web/booba-shim/
+web/LICENSE

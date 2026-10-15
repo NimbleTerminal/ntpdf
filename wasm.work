@@ -1,0 +1,9 @@
+// Browser-only Bubble Tea fork; validate the demo bridge when updating.
+// Native consumers use the upstream dependency in go.mod.
+go 1.26.8
+
+use .
+
+replace charm.land/bubbletea/v2 => github.com/neomantra/bubbletea/v2 v2.0.0-20261009201241-c397c32a5074
+
+replace nimbleterminal.dev/ntpicture => ../ntpicture

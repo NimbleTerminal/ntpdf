@@ -1,4 +1,4 @@
-// pdfview/image.go: ImageMode plumbing.
+// image.go: ImageMode plumbing.
 //
 // The widget owns a per-document Renderer whose lifetime is tied to the
 // loaded PDF — SetPDF closes the previous one and opens a new one via the
@@ -6,7 +6,7 @@
 // future swap-ins) live in build-tagged sibling files so the browser-WASM
 // build stays free of host-dependent code.
 
-package pdfview
+package ntpdf
 
 import "image"
 

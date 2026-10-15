@@ -1,4 +1,4 @@
-package pdfview
+package ntpdf
 
 import (
 	"image"

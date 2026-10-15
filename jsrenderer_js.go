@@ -1,15 +1,15 @@
-// pdfview/jsrenderer_js.go: browser-WASM Renderer backed by
+// jsrenderer_js.go: browser-WASM Renderer backed by
 // booba-shim/pdfium (the @embedpdf/pdfium JS bridge installed by
 // `go tool booba-shim-assets --shim=pdfium`).
 //
-// Conforms to the same pdfview.Renderer contract as the native
+// Conforms to the same ntpdf.Renderer contract as the native
 // pdfium-via-wazero implementation. Mutex serialization, idempotent
 // Close, and the GC leak guard live in pdfium.Document; this file is
 // only the 1-indexed-page / DPI-budget adapter.
 
 //go:build js && wasm
 
-package pdfview
+package ntpdf
 
 import (
 	"context"

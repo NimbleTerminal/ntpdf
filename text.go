@@ -1,7 +1,7 @@
-// pdfview/text.go: PDF loading, positioned text extraction, and the
+// text.go: PDF loading, positioned text extraction, and the
 // TextMode renderer that projects each text run onto a terminal cell grid.
 
-package pdfview
+package ntpdf
 
 import (
 	"bytes"

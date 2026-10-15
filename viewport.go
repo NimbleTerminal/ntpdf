@@ -1,4 +1,4 @@
-// pdfview/viewport.go: zoom + pan plumbing for ImageMode.
+// viewport.go: zoom + pan plumbing for ImageMode.
 //
 // The viewport is described in normalized [0, 1] source-image coords:
 // (panX, panY) is the top-left corner of the visible rectangle and
@@ -6,7 +6,7 @@
 // as a fraction (rather than pixels) lets the viewport survive a
 // re-render at a different DPI or cell-rect size.
 
-package pdfview
+package ntpdf
 
 import (
 	"image"
@@ -98,14 +98,13 @@ func (m *Model) pan(dx, dy float64) tea.Cmd {
 }
 
 // applyViewport crops the source image to the current viewport and
-// hands the result to the embedded picture.Model for rendering. Returns
-// picture's SetImage Cmd unchanged.
+// hands the result to the embedded picture.Picture for rendering.
 func (m *Model) applyViewport() tea.Cmd {
 	if m.sourceImage == nil {
-		return nil
+		return m.presentImage(nil, true)
 	}
 	view := cropToViewport(m.sourceImage, m.zoom, m.panX, m.panY)
-	return m.pic.SetImage(view)
+	return m.presentImage(view, m.sourceImmutable && m.zoom == 0)
 }
 
 // cropToViewport returns the sub-image described by (zoom, panX, panY)

@@ -1,9 +1,7 @@
-package pdfview
+package ntpdf
 
 import (
 	"image"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -150,13 +148,7 @@ func TestExtractPageRecoversFromPanic(t *testing.T) {
 	// doesn't break the happy path. The panic case is exercised by
 	// extractPage's defer block; we drive it directly through a
 	// constructed-but-invalid pdf.Page below.
-	dir, err := filepath.Abs("../testdata")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "Example.pdf")); err != nil {
-		t.Skip("testdata/Example.pdf missing")
-	}
+	_ = repoTestdata(t, "Example.pdf")
 	// Null-page input shouldn't crash even though Content() would
 	// dereference its V field. extractPage's IsNull guard short-circuits.
 	out := extractPage(pdf.Page{}, Limits{MaxImagesPerPage: 1024})

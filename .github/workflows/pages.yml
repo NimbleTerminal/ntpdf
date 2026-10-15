@@ -3,6 +3,10 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,29 +17,39 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
-# Actions are pinned to commit SHAs (resolved from the version tag at
-# pin time). This blocks tag-retagging attacks where an attacker who
-# compromises an action repository can backdoor a release without
-# bumping the tag. The `# v<tag>` trailing comment is the human-readable
-# version reference — Dependabot / Renovate use it to drive bumps
-# (see .github/dependabot.yml).
+env:
+  GOWORK: 'off'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Build WASM binary
-        run: GOARCH=wasm GOOS=js go build -o web/app.wasm ./examples/pdfview/
+          cache-dependency-path: |
+            go.sum
+            wasm.work.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Build WASM demo
+        run: |
+          mkdir -p web/demos
+          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go build -o web/demos/pdfview.wasm ./examples/pdfview
       - name: Set up web assets
-        run: go tool booba-assets web/
-      - name: Install booba-shim pdfium assets
-        run: go tool booba-shim-assets web/ --shim=pdfium
-      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        run: |
+          go tool booba-assets --no-index web
+          go tool booba-shim-assets web/ --shim=pdfium
+          cp LICENSE.txt web/LICENSE
+      - name: Check site and smoke-test WASM demo
+        run: |
+          node --check web/site.js
+          node scripts/check-site.mjs
+          node scripts/smoke-demo.mjs pdfview
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web
 

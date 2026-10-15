@@ -1,10 +1,10 @@
-// Package pdfview is a Bubble Tea v2 widget that renders PDF documents in
+// Package ntpdf is a Bubble Tea v2 widget that renders PDF documents in
 // the terminal. It offers two modes:
 //
 //   - TextMode extracts plain text via ledongthuc/pdf (pure Go, WASM-safe)
 //     and substitutes glyph placeholders for embedded images.
 //   - ImageMode rasterizes each page via a per-document Renderer and
-//     feeds the bitmap to ntcharts/v2/picture, which renders Kitty
+//     feeds the bitmap to nimbleterminal.dev/ntpicture, which renders Kitty
 //     graphics when the terminal supports it and falls back to half-
 //     block glyphs otherwise.
 //
@@ -17,11 +17,11 @@
 //     booba-shim pdfium instance (see web/booba-shim/pdfium/pdfium-shim.js)
 //   - GOOS=wasip1 GOARCH=wasm → nil (wazero-in-WASI is unusably slow)
 //
-// Mirrors the wrapping idioms of the sibling ntcharts-osm/mapview widget:
+// Mirrors the wrapping idioms of the sibling ntsvg widget:
 // value-receiver Update returning (Model, tea.Cmd), View returning a
 // tea.View so Kitty graphics can ride through, and a KeyMap a host program
 // can override field-by-field.
-package pdfview
+package ntpdf
 
 import (
 	"fmt"
@@ -31,16 +31,19 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/NimbleMarkets/ntcharts/v2/picture"
+	picture "nimbleterminal.dev/ntpicture"
 )
 
-// Model is the pdfview widget. Use New or NewWithConfig to construct.
+// Model is the ntpdf widget. Use New or NewWithConfig to construct.
 type Model struct {
 	cfg   Config
 	keys  KeyMap
 	style Styles
 
-	pic        picture.Model
+	pic        *picture.Picture
+	picClosed  *bool
+	fit        FitMode
+	anchor     FitAnchor
 	cols, rows int
 
 	path string
@@ -54,12 +57,14 @@ type Model struct {
 	// sourceImage is the un-cropped image returned by the most recent
 	// Renderer.RenderPage call (or SetPageImage). nil until the first
 	// successful render for the current document. Cropped on demand to
-	// the (zoom, panX, panY) viewport before being handed to picture.Model.
-	sourceImage image.Image
+	// the (zoom, panX, panY) viewport before being handed to picture.Picture.
+	sourceImage     image.Image
+	sourceImmutable bool
+	presentedImage  image.Image
 
 	// Viewport state. zoom 0 means "fit the whole page to the cell rect"
 	// (no crop). zoom N (N >= 1) means crop the source to a 1/(2^N) ×
-	// 1/(2^N) sub-rectangle; picture.Model then scales that back up to
+	// 1/(2^N) sub-rectangle; picture.Picture then scales that back up to
 	// the cell rect, producing the chunky/dithered look that lets you
 	// see individual rasterized glyphs.
 	//
@@ -132,16 +137,26 @@ func NewWithConfig(cfg Config) Model {
 		styles = *cfg.Styles
 	}
 
+	if cfg.Fit != 0 && cfg.PictureConfig.Fit == 0 {
+		cfg.PictureConfig.Fit = cfg.Fit
+	}
+	if cfg.Anchor != 0 && cfg.PictureConfig.Anchor == 0 {
+		cfg.PictureConfig.Anchor = cfg.Anchor
+	}
+
 	var lg, rg uint64
+	var closed bool
 	m := Model{
-		cfg:   cfg,
-		keys:  DefaultKeyMap(),
-		style: styles,
-		pic:   picture.NewWithConfig(cfg.PictureConfig),
-		cols:  cfg.Cols,
-		rows:  cfg.Rows,
-		mode:  cfg.DefaultMode,
-		page:  cfg.InitialPage,
+		cfg:       cfg,
+		keys:      DefaultKeyMap(),
+		style:     styles,
+		picClosed: &closed,
+		fit:       cfg.PictureConfig.Fit,
+		anchor:    cfg.PictureConfig.Anchor,
+		cols:      cfg.Cols,
+		rows:      cfg.Rows,
+		mode:      cfg.DefaultMode,
+		page:      cfg.InitialPage,
 		// path is the in-flight display label. Seed it from whichever
 		// initial source will actually be loaded so View() can show
 		// "Loading <name>…" or surface an error while the async load
@@ -152,12 +167,52 @@ func NewWithConfig(cfg Config) Model {
 		renderGen: &rg,
 		cache:     &pageCache{},
 	}
-	if c := m.pic.SetSize(cfg.Cols, cfg.Rows); c != nil {
-		// SetSize during construction can't deliver a Cmd; the renderer
-		// has nothing to render anyway. Drop the no-op.
-		_ = c
-	}
+	m.pic = m.newPicture()
 	return m
+}
+
+func (m *Model) newPicture() *picture.Picture {
+	opts := m.cfg.PictureOptions
+	renderCfg := m.cfg.PictureConfig
+	if renderCfg == (picture.Config{}) && opts.Render != (picture.Config{}) {
+		renderCfg = opts.Render
+	}
+	renderCfg.Fit = m.fit
+	renderCfg.Anchor = m.anchor
+	opts.Render = renderCfg
+	p := picture.New(opts)
+	_ = p.SetSize(m.cols, m.rows)
+	if m.picClosed != nil {
+		*m.picClosed = false
+	}
+	return p
+}
+
+func (m *Model) ensurePicture() {
+	if m.pic == nil || (m.picClosed != nil && *m.picClosed) {
+		var mode picture.PictureMode
+		var cw, ch int
+		if m.pic != nil {
+			mode = m.pic.Mode()
+			cw, ch = m.pic.CellPixelSize()
+		}
+		m.pic = m.newPicture()
+		if cw > 0 && ch > 0 {
+			_ = m.pic.SetTerminal(mode == picture.PictureKitty, cw, ch)
+		}
+	}
+}
+
+func (m *Model) presentImage(img image.Image, immutable bool) tea.Cmd {
+	m.ensurePicture()
+	m.presentedImage = img
+	if img == nil {
+		return m.pic.SetImage(nil)
+	}
+	if immutable {
+		return m.pic.SetImageImmutable(img)
+	}
+	return m.pic.SetImage(img)
 }
 
 // Mode returns the current rendering mode.
@@ -165,6 +220,38 @@ func (m Model) Mode() Mode { return m.mode }
 
 // RenderMode returns the underlying picture protocol used by ImageMode.
 func (m Model) RenderMode() RenderMode { return m.pic.Mode() }
+
+// SetRenderMode explicitly sets the underlying picture protocol (Glyph or Kitty).
+func (m *Model) SetRenderMode(mode RenderMode) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetMode(mode)
+}
+
+// SetTerminal applies an explicit host graphics decision and cell pixel size
+// to the underlying picture.Picture without probing.
+func (m *Model) SetTerminal(kitty bool, cellWidth, cellHeight int) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetTerminal(kitty, cellWidth, cellHeight)
+}
+
+// SetResolution sets the Kitty raster resolution factor in (0, 1] on the
+// underlying picture.Picture.
+func (m *Model) SetResolution(factor float64) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetResolution(factor)
+}
+
+// RasterGeometry returns the target cell and pixel geometry of the underlying
+// picture.Picture.
+func (m Model) RasterGeometry() picture.RasterGeometry {
+	return m.pic.RasterGeometry()
+}
+
+// PictureStatus returns the current preparation/presentation snapshot from the
+// underlying picture.Picture.
+func (m Model) PictureStatus() picture.Status {
+	return m.pic.Status()
+}
 
 // Page returns the current 1-indexed page number. Before any document
 // is loaded the value is Config.InitialPage (defaulting to 1) — there
@@ -202,10 +289,14 @@ func (m Model) PageDimensions(n int) (w, h int, ok bool) {
 func (m Model) Err() error { return m.err }
 
 // KittySupported reports the terminal's Kitty graphics capability. The
-// probe runs once per process (batched from Init via the underlying
-// picture.Model); expect KittyCapabilityUnknown for the first few frames
-// until the terminal responds (typically <50ms).
-func (m Model) KittySupported() picture.KittyCapability { return m.pic.KittySupported() }
+// probe runs once per session/process; expect KittyCapabilityUnknown for the
+// first few frames until the terminal responds (typically <50ms).
+func (m Model) KittySupported() picture.KittyCapability {
+	if m.cfg.PictureOptions.Session != nil {
+		return m.cfg.PictureOptions.Session.Snapshot().Kitty
+	}
+	return picture.KittySupported()
+}
 
 // HasRenderer reports whether an active Renderer is attached to the
 // currently-loaded document. False means ImageMode requests will fall
@@ -218,13 +309,39 @@ func (m Model) HasRenderer() bool { return m.cur != nil }
 // unavailable. Cleared on SetPDF.
 func (m Model) RendererErr() error { return m.rendererErr }
 
-// Close releases any renderer-side resources held by the currently-loaded
-// document (e.g. pdfium document handle and pool instance). Safe to call
-// when no document is loaded. Hosts should call this on shutdown when
-// they want a clean exit; leaking the renderer at process exit is fine
-// for short-lived TUIs.
+// Dispose cancels pending picture work, releases shared-memory buffers, closes
+// any attached PDF renderer, and returns the terminal placement cleanup Cmd
+// from ntpicture.Picture. Run the returned command when removing the widget or
+// before quitting.
+func (m *Model) Dispose() tea.Cmd {
+	m.clearCache()
+	var cmd tea.Cmd
+	if m.pic != nil {
+		cmd = m.pic.Close()
+		if m.picClosed != nil {
+			*m.picClosed = true
+		}
+	}
+	m.presentedImage = nil
+	if m.cur != nil {
+		_ = m.cur.Close()
+		m.cur = nil
+	}
+	return cmd
+}
+
+// Close releases picture transport and renderer-side resources held by the
+// currently-loaded document (e.g. pdfium document handle and pool instance).
+// Safe to call when no document is loaded.
 func (m *Model) Close() error {
 	m.clearCache()
+	if m.pic != nil {
+		_ = m.pic.Close()
+		if m.picClosed != nil {
+			*m.picClosed = true
+		}
+	}
+	m.presentedImage = nil
 	if m.cur == nil {
 		return nil
 	}
@@ -236,11 +353,12 @@ func (m *Model) Close() error {
 // KeyMap exposes the active bindings; mutate fields to rebind.
 func (m *Model) KeyMap() *KeyMap { return &m.keys }
 
-// SetSize updates the cell rectangle and forwards to the picture.Model.
-// The returned Cmd may carry a Kitty re-placement frame; batch it through
+// SetSize updates the cell rectangle and forwards to the picture.Picture.
+// The returned Cmd prepares a re-sized placement frame; batch it through
 // the program's tea.Cmd pipeline.
 func (m *Model) SetSize(cols, rows int) tea.Cmd {
 	m.cols, m.rows = cols, rows
+	m.ensurePicture()
 	cmd := m.pic.SetSize(cols, rows)
 	// Re-rasterize the current page at the new size when in ImageMode
 	// and we have something loaded.
@@ -249,6 +367,14 @@ func (m *Model) SetSize(cols, rows int) tea.Cmd {
 	}
 	return cmd
 }
+
+// Image returns the full-resolution rasterized bitmap of the current page from
+// the most recent successful render (or SetPageImage), or nil when nothing has
+// been rasterized for the current page.
+func (m Model) Image() image.Image { return m.sourceImage }
+
+// Renderer returns the active Renderer of the loaded document, or nil.
+func (m Model) Renderer() Renderer { return m.cur }
 
 // SetPDFData loads an in-memory PDF and resets the current page to
 // InitialPage. name is the display label shown in status bars; it is
@@ -272,6 +398,7 @@ func (m *Model) SetPDFData(name string, data []byte) tea.Cmd {
 	m.page = m.cfg.InitialPage
 	m.docPages = nil
 	m.sourceImage = nil
+	m.sourceImmutable = false
 	m.rendererErr = nil
 	m.zoom, m.panX, m.panY = 0, 0, 0
 	m.err = nil
@@ -310,6 +437,7 @@ func (m *Model) SetPDF(path string) tea.Cmd {
 	m.page = m.cfg.InitialPage
 	m.docPages = nil
 	m.sourceImage = nil
+	m.sourceImmutable = false
 	m.rendererErr = nil
 	// Reset viewport on document change. Per-page viewport persistence is
 	// useful for flipping through a book at fixed zoom; switching docs
@@ -342,6 +470,7 @@ func (m *Model) SetPage(n int) tea.Cmd {
 	}
 	m.page = n
 	m.sourceImage = nil
+	m.sourceImmutable = false
 	if m.mode == ImageMode {
 		return m.renderPageCmd(n)
 	}
@@ -367,11 +496,21 @@ func (m *Model) ToggleMode() tea.Cmd {
 	}
 	m.mode = TextMode
 	// Drop any on-screen Kitty placement.
-	return m.pic.SetImage(nil)
+	return m.presentImage(nil, true)
 }
 
 // ToggleRenderMode swaps Glyph↔Kitty for ImageMode rendering.
-func (m *Model) ToggleRenderMode() tea.Cmd { return m.pic.Toggle() }
+// Entering Kitty mode is a no-op until Kitty support is confirmed.
+func (m *Model) ToggleRenderMode() tea.Cmd {
+	m.ensurePicture()
+	if m.pic.Mode() == picture.PictureGlyph {
+		if m.KittySupported() != picture.KittyCapabilitySupported {
+			return nil
+		}
+		return m.pic.SetMode(picture.PictureKitty)
+	}
+	return m.pic.SetMode(picture.PictureGlyph)
+}
 
 // Reload re-rasterizes the current page in ImageMode (no-op in TextMode).
 func (m *Model) Reload() tea.Cmd {
@@ -390,9 +529,10 @@ func (m *Model) SetPageImage(page int, img image.Image) tea.Cmd {
 		return nil
 	}
 	m.sourceImage = img
+	m.sourceImmutable = false
 	// Guard the docPages write: SetPageImage may be called before
 	// SetPDF, in which case docPages is nil and indexing panics.
-	if page <= len(m.docPages) {
+	if page <= len(m.docPages) && img != nil {
 		b := img.Bounds()
 		m.docPages[page-1].width = b.Dx()
 		m.docPages[page-1].height = b.Dy()
@@ -439,15 +579,18 @@ func (m *Model) PanUp() tea.Cmd    { return m.pan(0, -1) }
 func (m *Model) PanDown() tea.Cmd  { return m.pan(0, +1) }
 
 // Fit returns the current FitMode (how the image is mapped onto the cell
-// rectangle when rendered by picture.Model).
-func (m Model) Fit() FitMode { return m.pic.Fit() }
+// rectangle when rendered by picture.Picture).
+func (m Model) Fit() FitMode {
+	if m.pic != nil {
+		return m.pic.Fit()
+	}
+	return m.fit
+}
 
 // CycleFit advances the FitMode through Contain → Fill → Cover → Contain.
-// Returns picture.Model's re-render Cmd; safe to call in any mode (no-op
-// effect when sourceImage is nil but the Cmd still bumps picture's seq).
 func (m *Model) CycleFit() tea.Cmd {
 	next := FitContain
-	switch m.pic.Fit() {
+	switch m.Fit() {
 	case FitContain:
 		next = FitFill
 	case FitFill:
@@ -455,7 +598,33 @@ func (m *Model) CycleFit() tea.Cmd {
 	case FitCover:
 		next = FitContain
 	}
-	return m.pic.SetFit(next)
+	return m.SetFit(next)
+}
+
+// SetFit updates the FitMode on the underlying picture.Picture.
+func (m *Model) SetFit(fit FitMode) tea.Cmd {
+	m.ensurePicture()
+	cmd := m.pic.SetFit(fit)
+	m.fit = m.pic.Fit()
+	m.cfg.PictureConfig.Fit = m.fit
+	return cmd
+}
+
+// Anchor returns the current FitAnchor.
+func (m Model) Anchor() FitAnchor {
+	if m.pic != nil {
+		return m.pic.Anchor()
+	}
+	return m.anchor
+}
+
+// SetAnchor updates the FitAnchor on the underlying picture.Picture.
+func (m *Model) SetAnchor(anchor FitAnchor) tea.Cmd {
+	m.ensurePicture()
+	cmd := m.pic.SetAnchor(anchor)
+	m.anchor = m.pic.Anchor()
+	m.cfg.PictureConfig.Anchor = m.anchor
+	return cmd
 }
 
 // ResetView snaps zoom to 0 and pan to the page origin (i.e. fit-to-rect
@@ -474,7 +643,7 @@ func (m *Model) ResetView() tea.Cmd {
 
 // Init returns a Cmd that kicks off the initial load (if either
 // Config.InitialData or Config.InitialPath is set) plus the picture
-// model's own init (Kitty capability probe). The pdfLoadedMsg
+// controller's own init (Kitty capability probe). The pdfLoadedMsg
 // delivered later populates m.docPages and friends via Update — no
 // value-receiver mutation needed here.
 //
@@ -526,7 +695,7 @@ func bump(p *uint64) uint64 {
 	return *p
 }
 
-// Update routes messages through the picture.Model, consumes the
+// Update routes messages through the picture.Picture, consumes the
 // widget's own async load/render notifications, and dispatches the
 // configured KeyMap bindings.
 //
@@ -566,8 +735,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		if m.page < 1 {
 			m.page = 1
 		}
-		if m.mode == ImageMode {
+		if m.mode == ImageMode && m.cur != nil {
 			cmds = append(cmds, m.renderPageCmd(m.page))
+		} else if m.presentedImage != nil {
+			if c := m.presentImage(nil, true); c != nil {
+				cmds = append(cmds, c)
+			}
 		}
 
 	case pdfErrMsg:
@@ -580,6 +753,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			break // stale doc, stale render, or page changed under us
 		}
 		m.sourceImage = msg.img
+		m.sourceImmutable = true
 		m.addToCache(msg.page, msg.dpi, msg.img)
 		b := msg.img.Bounds()
 		m.docPages[msg.page-1].width = b.Dx()
@@ -595,12 +769,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 
-	// Forward all messages — including the ones we just handled — to the
-	// picture model so it can react to Kitty frame applications and resize
-	// notifications. picture.Update is a no-op for messages it doesn't
-	// recognize.
-	if c := m.pic.Update(msg); c != nil {
-		cmds = append(cmds, c)
+	// Forward every message to the picture controller so it can react to
+	// prepared frames, placement retirements, and terminal notifications.
+	if m.pic != nil {
+		if c := m.pic.Update(msg); c != nil {
+			cmds = append(cmds, c)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -708,19 +882,21 @@ func (m Model) View() tea.View {
 	}
 	if m.mode == ImageMode && m.sourceImage != nil {
 		// picture.View()'s content is only as tall as the rendered image
-		// needs — Kitty mode emits the placement as a short escape +
-		// trailing blank lines that may not reach m.rows, and FitContain
+		// needs — Kitty mode emits the placement grid and FitContain
 		// can letterbox without padding the vertical axis. Pinning the
 		// returned content to (cols × rows) via lipgloss.Place keeps the
 		// host's surrounding border at a stable size across mode and
 		// fit-mode transitions; the existing image content is preserved
 		// (Place doesn't truncate when target dims meet the content's
 		// natural size).
-		pv := m.pic.View()
-		if m.cols > 0 && m.rows > 0 {
-			pv.Content = lipgloss.Place(m.cols, m.rows, lipgloss.Left, lipgloss.Top, pv.Content)
+		var content string
+		if m.pic != nil {
+			content = m.pic.View()
 		}
-		return pv
+		if m.cols > 0 && m.rows > 0 {
+			content = lipgloss.Place(m.cols, m.rows, lipgloss.Left, lipgloss.Top, content)
+		}
+		return tea.NewView(content)
 	}
 	// Either TextMode, or ImageMode with no rasterized image yet. Size
 	// the rendered text to the same (cols × rows) envelope so a
@@ -830,10 +1006,19 @@ func (m *Model) calcDynamicDPI(page int) int {
 	}
 
 	cellW := m.cfg.CellPixelWidth
+	cellH := m.cfg.CellPixelHeight
+	if (cellW <= 0 || cellH <= 0) && m.pic != nil {
+		pw, ph := m.pic.CellPixelSize()
+		if cellW <= 0 {
+			cellW = pw
+		}
+		if cellH <= 0 {
+			cellH = ph
+		}
+	}
 	if cellW <= 0 {
 		cellW = 8
 	}
-	cellH := m.cfg.CellPixelHeight
 	if cellH <= 0 {
 		cellH = 16
 	}

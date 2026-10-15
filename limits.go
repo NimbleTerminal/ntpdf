@@ -1,4 +1,4 @@
-// pdfview/limits.go: RendererFactory wrapper that enforces caps that
+// limits.go: RendererFactory wrapper that enforces caps that
 // don't depend on a Renderer's storage model (currently just per-call
 // DPI clamping). MaxFileBytes is enforced inside the default local
 // renderer because file-size checks via os.Stat only make sense for
@@ -7,7 +7,7 @@
 // fail. MaxRenderPixels lives in the concrete renderer because only
 // it can query page dimensions.
 
-package pdfview
+package ntpdf
 
 import "image"
 

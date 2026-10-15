@@ -1,16 +1,16 @@
-# ntcharts-pdf — Terminal PDF viewer widget for Bubble Tea
+# ntpdf — Terminal PDF viewer widget for Bubble Tea
 
 <p>
-    <a href="https://github.com/NimbleMarkets/ntcharts-pdf/tags"><img src="https://img.shields.io/github/tag/NimbleMarkets/ntcharts-pdf.svg" alt="Latest Release"></a>
-    <a href="https://pkg.go.dev/github.com/NimbleMarkets/ntcharts-pdf?tab=doc"><img src="https://godoc.org/github.com/golang/gddo?status.svg" alt="GoDoc"></a>
-    <a href="https://github.com/NimbleMarkets/ntcharts-pdf/blob/main/CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg"  alt="Code Of Conduct"></a>
+    <a href="https://github.com/nimbleterminal/ntpdf/tags"><img src="https://img.shields.io/github/tag/nimbleterminal/ntpdf.svg" alt="Latest Release"></a>
+    <a href="https://pkg.go.dev/nimbleterminal.dev/ntpdf?tab=doc"><img src="https://godoc.org/github.com/golang/gddo?status.svg" alt="GoDoc"></a>
+    <a href="https://github.com/nimbleterminal/ntpdf/blob/main/CODE_OF_CONDUCT.md"><img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Code Of Conduct"></a>
 </p>
 
-`ntcharts-pdf` is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) widget that renders PDF documents in the terminal. It pairs [`ledongthuc/pdf`](https://github.com/ledongthuc/pdf) for pure-Go text extraction with [`ntcharts/v2/picture`](https://github.com/NimbleMarkets/ntcharts) for image rendering — half-block glyphs anywhere, full-resolution Kitty graphics on terminals that support them (Kitty, Ghostty, WezTerm).  Browser-based image rendering uses [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium).
+`ntpdf` (`nimbleterminal.dev/ntpdf`) is a [Bubble Tea](https://github.com/charmbracelet/bubbletea) widget that renders PDF documents in the terminal. It pairs [`ledongthuc/pdf`](https://github.com/ledongthuc/pdf) for pure-Go text extraction with [`ntpicture`](https://github.com/nimbleterminal/ntpicture) (`nimbleterminal.dev/ntpicture`) for image rendering — half-block glyphs anywhere, full-resolution Kitty graphics on terminals that support them (Kitty, Ghostty, WezTerm). Browser-based image rendering uses [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium).
 
-[Try out the live WASM demo.](https://nimblemarkets.github.io/ntcharts-pdf)
+[**Try out the live WASM demo.**](https://nimbleterminal.github.io/ntpdf)
 
-<p align="center"><img src="examples/pdfview/demo.gif" alt="pdfview demo" width="65%"/></p>
+<p align="center"><img src="examples/pdfview/demo.gif" alt="ntpdf demo" width="65%"/></p>
 
 The widget has two modes:
 
@@ -27,16 +27,16 @@ import (
     "os"
 
     tea "charm.land/bubbletea/v2"
-    "github.com/NimbleMarkets/ntcharts-pdf/pdfview"
+    "nimbleterminal.dev/ntpdf"
 )
 
-type model struct{ pv pdfview.Model }
+type model struct{ pv ntpdf.Model }
 
 func (m model) Init() tea.Cmd { return m.pv.Init() }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
     if k, ok := msg.(tea.KeyMsg); ok && (k.String() == "q" || k.String() == "ctrl+c") {
-        return m, tea.Quit
+        return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
     }
     if sz, ok := msg.(tea.WindowSizeMsg); ok {
         return m, m.pv.SetSize(sz.Width, sz.Height)
@@ -49,7 +49,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() tea.View { return m.pv.View() }
 
 func main() {
-    pv := pdfview.NewWithConfig(pdfview.Config{InitialPath: os.Args[1]})
+    pv := ntpdf.NewWithConfig(ntpdf.Config{InitialPath: os.Args[1]})
     if _, err := tea.NewProgram(model{pv: pv}).Run(); err != nil {
         fmt.Println(err); os.Exit(1)
     }
@@ -58,23 +58,34 @@ func main() {
 
 Page with `n` / `p`, toggle Text ↔ Image with `m`, swap Glyph ↔ Kitty with `g`, zoom with `+` / `-`, pan with arrows, fit with `f`, reset view with `0`. The widget's `Update` dispatches all of these through `DefaultKeyMap()`; rebind a field to change the keystroke (or set a binding to `key.Binding{}` to disable it).
 
-## Demo
+## Demos
 
-A fuller demo lives at [`examples/pdfview`](./examples/pdfview/main.go) — adds a status bar, help bubble, and reload key.
+Building requires Go 1.26.8 or newer.
+
+- **`task run-pdfview`** ([`examples/pdfview`](./examples/pdfview/main.go)) — single-pane CLI viewer (`./bin/ntpdf-pdfview [path.pdf]`) with a status bar, help bubble, and reload key.
+- **`./bin/ntpdf-pagedims`** ([`examples/pagedims`](./examples/pagedims/main.go)) — aspect-matched cell-rectangle demo using `Model.PageDimensions`.
 
 ```sh
-task build-ex-pdfview
-./bin/ntcharts-pdfview path/to/your.pdf
+task build-examples
+./bin/ntpdf-pdfview path/to/your.pdf
 ```
+
+The `pdfview` example also compiles to WebAssembly and runs in the browser via [`booba`](https://github.com/NimbleMarkets/go-booba), publishing its key bindings as interactive action buttons above the terminal:
+
+```sh
+task serve-wasm-site   # builds web/demos/pdfview.wasm, stages booba + pdfium assets, serves http://localhost:8000/web/
+```
+
+The browser demo uses booba v0.9.2 and requests `ntpicture`'s Kitty shared-memory transport, passing raw RGBA frames without PNG encoding or base64 image payloads, and falling back to direct PNG when the browser bridge is unavailable. Call `Model.Dispose()` (returning the terminal placement cleanup `tea.Cmd`) or `Model.Close()` when disposing the widget.
 
 ## Modes
 
 | Mode | What it does | Where it works |
 |---|---|---|
-| `pdfview.TextMode` (default) | Plain text via `ledongthuc/pdf`, styled with lipgloss; embedded images shown as boxed placeholders | Everywhere, including WASM |
-| `pdfview.ImageMode` | Rasterized page via a `Renderer` (default: `go-pdfium`/wazero on native, the `@embedpdf/pdfium` JS bridge under `GOOS=js`), fed to `ntcharts/v2/picture`. Supports zoom (`+`/`-` up to ×64) and pan (arrow keys when zoomed) | Native + browser-WASM out of the box; WASI needs a custom `RendererFactory` |
+| `ntpdf.TextMode` (default) | Plain text via `ledongthuc/pdf`, styled with lipgloss; embedded images shown as boxed placeholders | Everywhere, including WASM |
+| `ntpdf.ImageMode` | Rasterized page via a `Renderer` (default: `go-pdfium`/wazero on native, the `@embedpdf/pdfium` JS bridge under `GOOS=js`), fed to `nimbleterminal.dev/ntpicture`. Supports zoom (`+`/`-` up to ×64) and pan (arrow keys when zoomed) | Native + browser-WASM out of the box; WASI needs a custom `RendererFactory` |
 
-`pv.ToggleMode()` returns a `tea.Cmd` that swaps modes and re-renders. Image mode internally uses `picture.PictureGlyph` (universal half-blocks) or `picture.PictureKitty` (high-resolution); switch between them with `pv.ToggleRenderMode()`.
+`pv.ToggleMode()` returns a `tea.Cmd` that swaps modes and re-renders. Image mode internally uses `ntpicture.PictureGlyph` (universal half-blocks) or `ntpicture.PictureKitty` (high-resolution); switch between them with `pv.ToggleRenderMode()`.
 
 ## Renderer
 
@@ -92,10 +103,10 @@ The factory is **bytes-first**: the widget reads file contents once (subject to 
 The widget treats `Config.RendererFactory` as optional. When nil, `NewWithConfig` calls `DefaultRendererFactory()`:
 
 - **Native builds** return a `go-pdfium`-backed factory. The first call lazily initialises a wazero pool with the embedded `pdfium.wasm` blob (cold start ~hundreds of ms; warm calls are fast).
-- **Browser-WASM (`GOOS=js GOARCH=wasm`)** bridges to [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium) via the [`booba-shim/pdfium`](https://github.com/NimbleMarkets/booba-shim) package. The host loads `web/booba-shim/pdfium/pdfium-shim.js` (installed by `go tool booba-shim-assets web/ --shim=pdfium`), which fetches the PDFium WebAssembly build from the jsDelivr CDN and populates `window.boobaShim.pdfium` — the Go renderer picks it up and uses the same PDFium engine that runs natively. See `web/index.html` for the full wiring.
+- **Browser-WASM (`GOOS=js GOARCH=wasm`)** bridges to [`@embedpdf/pdfium`](https://www.npmjs.com/package/@embedpdf/pdfium) via the [`booba-shim/pdfium`](https://github.com/NimbleMarkets/booba-shim) package. The host loads `web/booba-shim/pdfium/pdfium-shim.js` (installed by `go tool booba-shim-assets web/ --shim=pdfium`), which fetches the PDFium WebAssembly build from the jsDelivr CDN and populates `window.boobaShim.pdfium` — the Go renderer picks it up and uses the same PDFium engine that runs natively. See `web/site.js` for the wiring.
 - **WASI (`GOOS=wasip1 GOARCH=wasm`)** returns nil. wazero can technically run interpreted inside WASI but the performance would be unusable for PDF rasterization.
 
-When the factory returns nil (or fails), ImageMode requests fall back to TextMode at View() time. Hosts that ship a server-side rasterizer can wire up their own `RendererFactory` and keep Image mode in WASM. Each loaded document gets its own `Renderer`; `pv.Close()` releases the document handle eagerly when a longer-lived host wants explicit cleanup.
+When the factory returns nil (or fails), ImageMode requests fall back to TextMode at View() time. Hosts that ship a server-side rasterizer can wire up their own `RendererFactory` and keep Image mode in WASM. Each loaded document gets its own `Renderer`; `pv.Dispose()` / `pv.Close()` releases the document handle and picture transport resources when a longer-lived host wants explicit cleanup.
 
 ### Loading APIs
 
@@ -103,6 +114,7 @@ When the factory returns nil (or fails), ImageMode requests fall back to TextMod
 |---|---|
 | `pv.SetPDF(path)` / `Config.InitialPath` | PDF is on disk; widget reads it once (`Limits.MaxFileBytes` enforced via `os.Stat`) |
 | `pv.SetPDFData(name, data)` / `Config.InitialData` + `InitialName` | PDF bytes already in memory (embedded, fetched, pre-decompressed); `len(data)` checked against `MaxFileBytes` |
+| `pv.SetPageImage(page, img)` | Install a pre-rasterized `image.Image` for a page, bypassing the `Renderer` |
 
 `Config.RenderDPI` (default 300) sets the rasterization resolution; raise it for crisper Kitty output, lower it to trade fidelity for speed.
 
@@ -127,18 +139,19 @@ Set any field to `-1` to disable that cap for trusted input; zero uses the defau
 
 ### Sanitizing PDF-derived strings
 
-PDF metadata, error messages, and host-supplied paths can carry C0/C1 control sequences and Unicode bidi format chars ("Trojan Source"-style attacks). The widget's own status text is already sanitized. For host-displayed strings derived from the PDF or its filename — e.g. `RendererErr().Error()` rendered into your status bar — use `pdfview.SanitizeForTerminal(s string) string`, which drops anything outside Unicode's printable categories and folds newlines / tabs to single spaces.
+PDF metadata, error messages, and host-supplied paths can carry C0/C1 control sequences and Unicode bidi format chars ("Trojan Source"-style attacks). The widget's own status text is already sanitized. For host-displayed strings derived from the PDF or its filename — e.g. `RendererErr().Error()` rendered into your status bar — use `ntpdf.SanitizeForTerminal(s string) string`, which drops anything outside Unicode's printable categories and folds newlines / tabs to single spaces.
 
 ## Known caveats
 
+- **WASM dependencies.** `wasm.work` selects the Bubble Tea fork with browser support; native builds use the upstream dependency in `go.mod`. The WASM tasks and CI select this workspace automatically.
+- **Pre-release `ntpicture` replacement.** Until `nimbleterminal.dev/ntpicture` is tagged and published, `go.mod` and `wasm.work` use a sibling `replace nimbleterminal.dev/ntpicture => ../ntpicture` directive.
 - **Binary size grows by ~5 MB** from the embedded `pdfium.wasm` blob. The first ImageMode toggle pays a wazero compile cost (hundreds of ms); subsequent renders are fast. Programs that never enter ImageMode skip the cost entirely (pool init is `sync.Once`-gated and deferred to the first factory call).
 - **Browser-WASM ImageMode requires the host page to load `web/booba-shim/pdfium/pdfium-shim.js`** (installed by `go tool booba-shim-assets web/ --shim=pdfium`). The script loads `@embedpdf/pdfium` from the jsDelivr CDN — no npm install or bundler needed. Without it, the renderer factory returns an error on the first ImageMode toggle and ImageMode degrades to TextMode — the rest of the widget keeps working.
 - **WASI builds have no built-in image renderer.** `DefaultRendererFactory` returns nil. Hosts that need rasterization there can wire up a server-side rasterizer via `RendererFactory`; custom factories supplied in WASM environments are also responsible for their own resource caps (file size, request timeouts) since `Config.Limits.MaxFileBytes` is only enforced by the default local-filesystem renderer.
 - **PDFs are read fully into memory before rasterization.** `go-pdfium`'s `OpenDocument` takes a `[]byte`. For typical documents (single-digit MB) this is fine; multi-hundred-MB PDFs will use proportional RAM. Streaming open is possible via a custom RendererFactory.
 - **Per-page text extraction failures (including library panics) drop the page to an empty placeholder** rather than failing the whole load. A page that ledongthuc/pdf can't decode or that triggers a parser panic renders as a blank grid + image placeholder; ImageMode still rasterizes it correctly.
 - **Image placeholders count XObject entries with `/Subtype /Image`** in the page resources. Inline images (BI/EI operators inside the content stream) aren't counted — uncommon enough not to matter for most PDFs, easy to add later if you encounter a doc that uses them heavily.
-- **Kitty placement composition through lipgloss** is best-effort. `picture.Model.View()` embeds the Kitty placement escapes directly in the rendered string, which composes cleanly inside `lipgloss.JoinVertical` and basic borders but may misbehave under styles that rewrite the content (e.g. `Width` with truncation on a Kitty payload). Glyph mode has no such caveat.
-- **No page caching across flips.** Each Image-mode page-flip re-rasterizes via the renderer. A 300-DPI Letter-size page through pdfium runs in ~150–300ms on a recent Mac. Layer a renderer with its own cache if your flow does heavy back-and-forth.
+- **Kitty placement composition through lipgloss** is best-effort. `ntpicture.Picture.View()` embeds the Kitty placement escapes directly in the rendered string, which composes cleanly inside `lipgloss.JoinVertical` and basic borders. Glyph mode has no such caveat.
 - **Vibe coded** This comment was inserted by a human.
 
 ## License

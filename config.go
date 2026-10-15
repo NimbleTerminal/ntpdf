@@ -1,11 +1,11 @@
-// pdfview/config.go: configuration, key bindings, modes.
+// config.go: configuration, key bindings, modes, and resource limits.
 
-package pdfview
+package ntpdf
 
 import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
-	"github.com/NimbleMarkets/ntcharts/v2/picture"
+	picture "nimbleterminal.dev/ntpicture"
 )
 
 // Mode selects how the current PDF page is presented.
@@ -13,12 +13,12 @@ type Mode int8
 
 const (
 	TextMode  Mode = iota // Extracted text with styled image placeholders
-	ImageMode             // Rasterized page via picture.Model
+	ImageMode             // Rasterized page via ntpicture.Picture
 )
 
 // RenderMode is the underlying picture protocol for ImageMode. Aliased so
 // callers can reach picture's constants (RenderGlyph, RenderKitty) without
-// importing picture directly.
+// importing ntpicture directly.
 type RenderMode = picture.PictureMode
 
 const (
@@ -27,14 +27,26 @@ const (
 )
 
 // FitMode controls how the page image is mapped onto the cell rectangle.
-// Re-exported from picture so callers can drive picture.Model behavior
-// (Contain / Fill / Cover) through pdfview's API surface.
+// Re-exported from ntpicture so callers can drive picture.Picture behavior
+// (Contain / Fill / Cover) through ntpdf's API surface.
 type FitMode = picture.FitMode
 
 const (
 	FitContain = picture.FitContain // preserve aspect ratio, letterbox (default)
 	FitFill    = picture.FitFill    // stretch to fill the cell rectangle
 	FitCover   = picture.FitCover   // preserve aspect ratio, crop to fill
+)
+
+// FitAnchor controls which edge or center is preserved when FitCover must
+// crop overflow. Re-exported from ntpicture.
+type FitAnchor = picture.FitAnchor
+
+const (
+	AnchorCenter = picture.AnchorCenter // center crop (default)
+	AnchorTop    = picture.AnchorTop
+	AnchorBottom = picture.AnchorBottom
+	AnchorLeft   = picture.AnchorLeft
+	AnchorRight  = picture.AnchorRight
 )
 
 // DefaultRenderDPI is the resolution passed to Renderer.RenderPage when
@@ -230,7 +242,21 @@ type Config struct {
 	// to -1 to disable that specific cap for trusted input.
 	Limits Limits
 
-	// PictureConfig is forwarded verbatim to the underlying picture.Model.
+	// Fit controls how the rasterized page image is mapped onto the cell
+	// rectangle. The zero value is FitContain (preserve aspect ratio,
+	// letterbox).
+	Fit FitMode
+
+	// Anchor controls which edge or center is preserved when FitCover must
+	// crop overflow. Zero value is AnchorCenter.
+	Anchor FitAnchor
+
+	// PictureOptions configures the underlying ntpicture.Picture (such as
+	// a shared TerminalSession, NextID allocator, StableID, or RetireDelay).
+	PictureOptions picture.Options
+
+	// PictureConfig is forwarded to the underlying ntpicture.Picture's
+	// Render configuration.
 	PictureConfig picture.Config
 
 	// Styles overrides the default lipgloss styling. Nil uses DefaultStyles.

@@ -1,7 +1,7 @@
-// examples/pdfview/main.go — single-pane pdfview demo.
+// examples/pdfview/main.go — single-pane ntpdf demo.
 //
-// Loads the PDF named on the command line (defaulting to ./testdata/sample.pdf
-// relative to wherever the binary runs) and renders it. Keys:
+// Loads the PDF named on the command line (defaulting to the embedded
+// testdata/Example.pdf when no path is given) and renders it. Keys:
 //
 //	n/→/l       next page
 //	p/←/h       prev page
@@ -17,21 +17,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	booba "github.com/NimbleMarkets/go-booba"
 
-	"github.com/NimbleMarkets/ntcharts-pdf/pdfview"
-	"github.com/NimbleMarkets/ntcharts/v2/picture"
+	"nimbleterminal.dev/ntpdf"
+	"nimbleterminal.dev/ntpdf/examples/internal/demohelp"
+	picture "nimbleterminal.dev/ntpicture"
 )
 
 // embeddedExample is the demo PDF compiled into the binary, used when
 // the user runs the example without a path argument. Sized small (~270KB)
 // so the binary stays reasonable. The same file is the canonical
-// fixture for pdfview's integration tests.
+// fixture for ntpdf's integration tests.
 //
 //go:embed testdata/Example.pdf
 var embeddedExample []byte
@@ -59,7 +60,7 @@ func kittyBadge(cap picture.KittyCapability) string {
 	}
 }
 
-// appKeys is the parent program's help / status surface. The pdfview widget
+// appKeys is the parent program's help / status surface. The ntpdf widget
 // owns the page/mode bindings; this struct only exists so the bubbles/help
 // bubble has a single KeyMap to render from.
 type appKeys struct {
@@ -103,21 +104,56 @@ func (k appKeys) FullHelp() [][]key.Binding {
 }
 
 type model struct {
-	pv            pdfview.Model
+	pv            ntpdf.Model
 	help          help.Model
 	keys          appKeys
 	width, height int
+	preferKitty   bool
 }
 
-func initialModel(cfg pdfview.Config) model {
+func initialModel(cfg ntpdf.Config) model {
+	if runtime.GOOS == "js" {
+		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
+	}
 	return model{
-		pv:   pdfview.NewWithConfig(cfg),
-		help: help.New(),
-		keys: newAppKeys(),
+		pv:          ntpdf.NewWithConfig(cfg),
+		help:        help.New(),
+		keys:        newAppKeys(),
+		preferKitty: true,
 	}
 }
 
 func (m model) Init() tea.Cmd { return m.pv.Init() }
+
+func (m model) Help() []key.Binding {
+	return []key.Binding{
+		demohelp.Key("Next page", "n", "l"),
+		demohelp.Key("Prev page", "p", "h"),
+		demohelp.Key("Text / Image", "m", "t"),
+		demohelp.Key("Fit mode", "f"),
+		demohelp.Key("Zoom in", "+", "="),
+		demohelp.Key("Zoom out", "-", "_"),
+		demohelp.Key("Glyph / Kitty", "g"),
+		demohelp.Key("Reset view", "0"),
+		demohelp.Key("Quit", "q", "ctrl+c"),
+	}
+}
+
+func (m model) Summary() string {
+	mode := "text"
+	if m.pv.Mode() == ntpdf.ImageMode {
+		mode = "image"
+	}
+	fit := "contain"
+	switch m.pv.Fit() {
+	case ntpdf.FitFill:
+		fit = "fill"
+	case ntpdf.FitCover:
+		fit = "cover"
+	}
+	return fmt.Sprintf("Viewer: name=%s page=%d/%d mode=%s fit=%s zoom=%dx",
+		filepath.Base(m.pv.Name()), m.pv.Page(), m.pv.NumPages(), mode, fit, 1<<m.pv.Zoom())
+}
 
 func (m *model) resize() tea.Cmd {
 	if m.width == 0 || m.height == 0 {
@@ -125,7 +161,7 @@ func (m *model) resize() tea.Cmd {
 	}
 	m.help.SetWidth(m.width)
 	// Help bubble height swings between 1 (short) and 3 (FullHelp) rows;
-	// measure it after toggling so the pdfview shrinks instead of
+	// measure it after toggling so the viewer shrinks instead of
 	// scrolling the top of the box off-screen.
 	helpH := lipgloss.Height(m.help.View(m.keys))
 	innerW := m.width - 2
@@ -147,17 +183,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.resize()
 
 	case tea.KeyMsg:
+		if key.Matches(msg, m.pv.KeyMap().ToggleRender) {
+			m.preferKitty = false
+		}
 		switch msg.String() {
 		case "ctrl+c", "q":
-			// Close the renderer synchronously before we tell the
-			// program to quit. Bubble Tea hands Update a copy of the
-			// latest model, but the Renderer interface value inside
-			// m.pv.cur is a (pointer, type) tuple — the underlying
-			// *pdfiumRenderer is shared. Close acquires its mutex
-			// (waiting for any in-flight render) and releases the
-			// pdfium document handle + pool instance.
-			_ = m.pv.Close()
-			return m, tea.Quit
+			return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
 		case "?":
 			m.help.ShowAll = !m.help.ShowAll
 			return m, m.resize()
@@ -167,11 +198,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// widget is actually zoomed, fall through to the widget so
 		// its KeyMap dispatches the pan action.
 		case "left":
-			if m.pv.Mode() != pdfview.ImageMode || m.pv.Zoom() == 0 {
+			if m.pv.Mode() != ntpdf.ImageMode || m.pv.Zoom() == 0 {
 				return m, m.pv.PrevPage()
 			}
 		case "right":
-			if m.pv.Mode() != pdfview.ImageMode || m.pv.Zoom() == 0 {
+			if m.pv.Mode() != ntpdf.ImageMode || m.pv.Zoom() == 0 {
 				return m, m.pv.NextPage()
 			}
 		}
@@ -183,6 +214,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.pv, cmd = m.pv.Update(msg)
+	if m.preferKitty && m.pv.KittySupported() == picture.KittyCapabilitySupported {
+		m.preferKitty = false
+		if m.pv.RenderMode() != ntpdf.RenderKitty {
+			cmd = tea.Batch(cmd, m.pv.ToggleRenderMode())
+		}
+	}
 	return m, cmd
 }
 
@@ -192,30 +229,30 @@ func (m model) View() tea.View {
 		v.AltScreen = true
 		return v
 	}
-	// picture.Model embeds Kitty placement escapes directly inside View().Content,
+	// picture.Picture embeds Kitty placement escapes directly inside View(),
 	// so wrapping the content in a lipgloss border preserves them. Glyph mode
 	// just contains styled half-block chars and composes cleanly.
 	body := boxStyle.Render(m.pv.View().Content)
 
 	modeName := "Text"
-	if m.pv.Mode() == pdfview.ImageMode {
+	if m.pv.Mode() == ntpdf.ImageMode {
 		modeName = "Image"
 		if !m.pv.HasRenderer() {
 			// ImageMode is selected but no Renderer is attached — either
-			// no factory configured (typical on js/wasm), or the factory
+			// no factory configured (typical on wasip1/wasm), or the factory
 			// errored. Surface the specific cause when we have one so
 			// the user understands why pressing 'm' produced no change.
 			// Sanitize the error text: factory errors can echo back
 			// hostile filenames or PDF-derived bytes.
 			label := "Image (no renderer)"
 			if err := m.pv.RendererErr(); err != nil {
-				label = fmt.Sprintf("Image (renderer error: %s)", pdfview.SanitizeForTerminal(err.Error()))
+				label = fmt.Sprintf("Image (renderer error: %s)", ntpdf.SanitizeForTerminal(err.Error()))
 			}
 			modeName = badgeWarnStyle.Render(label)
 		}
 	}
 	renderName := "Glyph"
-	if m.pv.RenderMode() == pdfview.RenderKitty {
+	if m.pv.RenderMode() == ntpdf.RenderKitty {
 		renderName = "Kitty"
 	}
 	zoomTag := ""
@@ -224,21 +261,21 @@ func (m model) View() tea.View {
 	}
 	fitName := "Contain"
 	switch m.pv.Fit() {
-	case pdfview.FitFill:
+	case ntpdf.FitFill:
 		fitName = "Fill"
-	case pdfview.FitCover:
+	case ntpdf.FitCover:
 		fitName = "Cover"
 	}
 	// filepath.Base trims directory components from argv paths while
 	// leaving in-memory display names (e.g. "Example.pdf" from the
 	// embedded fixture) unchanged. Sanitize before display: PDF paths
 	// can carry control / bidi format chars from the OS or the embed.
-	name := pdfview.SanitizeForTerminal(filepath.Base(m.pv.Name()))
+	name := ntpdf.SanitizeForTerminal(filepath.Base(m.pv.Name()))
 	status := fmt.Sprintf("%s  page %d/%d%s  %s  %s  fit:%s  %s",
 		name, m.pv.Page(), m.pv.NumPages(), zoomTag, modeName, renderName, fitName,
 		kittyBadge(m.pv.KittySupported()))
 	if err := m.pv.Err(); err != nil {
-		status = errStyle.Render(err.Error()) + "  " + status
+		status = errStyle.Render(ntpdf.SanitizeForTerminal(err.Error())) + "  " + status
 	}
 	footer := footerStyle.Width(m.width).Render(status)
 
@@ -254,19 +291,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	// Resource cleanup is wired into the Update handler for `q` /
-	// `ctrl+c`, which calls pv.Close() synchronously before returning
-	// tea.Quit. The Bubble Tea program model is value-passed, but the
-	// Renderer interface holds a shared *pdfiumRenderer, so closing
-	// through the local copy still releases the real document handle
-	// and the wazero pool instance.
-	if err := booba.Run(initialModel(cfg)); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	demohelp.Main(initialModel(cfg))
 }
 
-// initialConfig assembles the pdfview.Config the example launches with.
+// initialConfig assembles the ntpdf.Config the example launches with.
 // argv[1] wins as a filesystem path; otherwise the embedded
 // Example.pdf bytes are passed in directly via Config.InitialData —
 // no temp file, no os.ReadFile, no filesystem entanglement.
@@ -276,16 +304,16 @@ func main() {
 // for the BGRA bitmap, which can push pdfium's auto-grown heap past
 // where it copes well. browserDefaultRenderDPI() returns a tighter
 // default for that path; native builds keep the package default (300).
-func initialConfig() (pdfview.Config, error) {
+func initialConfig() (ntpdf.Config, error) {
 	dpi := browserDefaultRenderDPI()
 	if len(os.Args) > 1 {
 		path := os.Args[1]
 		if _, err := os.Stat(path); err != nil {
-			return pdfview.Config{}, fmt.Errorf("argv[1] %q: %w", path, err)
+			return ntpdf.Config{}, fmt.Errorf("argv[1] %q: %w", path, err)
 		}
-		return pdfview.Config{InitialPath: path, RenderDPI: dpi}, nil
+		return ntpdf.Config{InitialPath: path, RenderDPI: dpi}, nil
 	}
-	return pdfview.Config{
+	return ntpdf.Config{
 		InitialData: embeddedExample,
 		InitialName: "Example.pdf",
 		RenderDPI:   dpi,

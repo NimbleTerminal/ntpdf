@@ -1,7 +1,7 @@
 // examples/pagedims/main.go — aspect-matched cell rectangle demo.
 //
-// Shows how to use pdfview.Model.PageDimensions to size the widget's
-// cell rectangle to a page's true aspect ratio, so picture.FitContain
+// Shows how to use ntpdf.Model.PageDimensions to size the widget's
+// cell rectangle to a page's true aspect ratio, so ntpdf.FitContain
 // renders the page edge-to-edge with zero letterbox.
 //
 // Run:
@@ -22,7 +22,7 @@ import (
 	"charm.land/lipgloss/v2"
 	booba "github.com/NimbleMarkets/go-booba"
 
-	"github.com/NimbleMarkets/ntcharts-pdf/pdfview"
+	"nimbleterminal.dev/ntpdf"
 )
 
 // cellPixelW / cellPixelH are the terminal cell pixel size the picture
@@ -35,7 +35,7 @@ const (
 )
 
 type model struct {
-	pv     pdfview.Model
+	pv     ntpdf.Model
 	width  int
 	height int
 	cols   int
@@ -48,8 +48,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if k := msg.String(); k == "q" || k == "ctrl+c" {
-			_ = m.pv.Close()
-			return m, tea.Quit
+			return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -120,11 +119,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: pagedims <path-to.pdf>")
 		os.Exit(1)
 	}
-	cfg := pdfview.Config{
+	cfg := ntpdf.Config{
 		InitialPath: os.Args[1],
-		DefaultMode: pdfview.ImageMode,
+		DefaultMode: ntpdf.ImageMode,
 	}
-	if err := booba.Run(model{pv: pdfview.NewWithConfig(cfg)}); err != nil {
+	if err := booba.Run(model{pv: ntpdf.NewWithConfig(cfg)}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

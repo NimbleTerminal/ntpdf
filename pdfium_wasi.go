@@ -1,4 +1,4 @@
-// pdfview/pdfium_wasi.go: WASI builds (GOOS=wasip1 GOARCH=wasm) have
+// pdfium_wasi.go: WASI builds (GOOS=wasip1 GOARCH=wasm) have
 // no built-in renderer. wazero — which go-pdfium uses internally —
 // can run inside WASI via its interpreter backend, but the compiler
 // only targets amd64/arm64 hosts; an interpreted pdfium would be
@@ -13,7 +13,7 @@
 
 //go:build wasm && !js
 
-package pdfview
+package ntpdf
 
 // DefaultRendererFactory returns nil under WASI: see file header for
 // rationale. Custom factories are responsible for their own resource

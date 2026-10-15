@@ -1,4 +1,4 @@
-// pdfview/sanitize.go: terminal-safe string sanitization.
+// sanitize.go: terminal-safe string sanitization.
 //
 // PDF-derived text and host-supplied paths reach the user via terminal
 // writes. Without filtering, a hostile PDF or filename can embed:
@@ -14,7 +14,7 @@
 // breaks / tabs with single spaces so a multi-line malicious string
 // can't fan out across the status bar.
 
-package pdfview
+package ntpdf
 
 import (
 	"strings"

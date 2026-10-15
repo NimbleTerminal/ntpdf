@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased
+
+- **Breaking:** rename module from `github.com/NimbleMarkets/ntcharts-pdf` to `nimbleterminal.dev/ntpdf` (`package ntpdf` at the module root).
+- Migrate terminal picture rendering from `github.com/NimbleMarkets/ntcharts/v2/picture` to `nimbleterminal.dev/ntpicture` (`*ntpicture.Picture`).
+- Move the browser Bubble Tea `replace` directive out of `go.mod` into `wasm.work` so native consumers use upstream `charm.land/bubbletea/v2` v2.1.0.
+- Upgrade `go-booba` to v0.9.2 and `charm.land/bubbletea/v2` to v2.1.0; wire browser demo controls with `bubblehelp` OSC 7501 action publishing and shared-memory RGBA Kitty transport.
+- Add `Fit`, `Anchor`, `SetFit`, `SetAnchor`, `PictureOptions`, `Dispose`, `SetTerminal`, `SetResolution`, `RasterGeometry`, and `PictureStatus` on `Model` / `Config`.
+
 ## v0.3.1 (2026-09-29)
 
  - Update Go dependencies, including NTCharts performance improvements.
@@ -26,4 +34,3 @@
 ## v0.1.0 (2026-05-12)
 
   * Initial release
-

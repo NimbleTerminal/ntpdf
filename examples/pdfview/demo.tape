@@ -17,7 +17,7 @@ Set TypingSpeed 60ms
 Set PlaybackSpeed 1.0
 
 # Launch — defaultPath finds testdata/Example.pdf automatically.
-Type "./bin/ntcharts-pdfview"
+Type "./bin/ntpdf-pdfview"
 Enter
 Sleep 1500ms
 

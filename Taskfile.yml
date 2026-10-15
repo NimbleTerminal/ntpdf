@@ -1,6 +1,9 @@
-# ntcharts-pdfview - Copyright (c) 2026 Neomantra Corp.
+# ntpdf - Copyright (c) 2026 Neomantra Corp.
 
 version: '3'
+
+env:
+  GOWORK: 'off'
 
 tasks:
   default:
@@ -26,6 +29,8 @@ tasks:
     run: once
     cmds:
       - go get -u ./...
+      - go get -u tool
+      - go mod tidy
 
   test:
     desc: 'Run fast Go unit tests'
@@ -37,20 +42,39 @@ tasks:
     cmds:
       - go test -tags=integration ./...
 
+  test-wasm:
+    desc: 'Run all Go tests under Node WASM'
+    env:
+      GOWORK: '{{.ROOT_DIR}}/wasm.work'
+      GOOS: js
+      GOARCH: wasm
+    cmds:
+      - 'go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./...'
+
+  vet:
+    desc: 'Run go vet'
+    cmds:
+      - go vet ./...
+
   build:
-    desc: 'Build all the things'
-    deps:
-      - build-examples
+    desc: 'Build library and native examples'
+    cmds:
+      - go build ./...
+      - task: build-examples
 
   clean:
-    desc: 'Clean built examples'
+    desc: 'Clean built examples and generated site artifacts'
+    deps:
+      - clean-wasm-site
     cmds:
-      - rm -f bin/ntcharts-pdfview
-      - rm -f bin/ntcharts-pagedims
-      - rm -rf .task
+      - rm -rf bin .task
 
 ###############################################################################
 # Examples
+
+  run-pdfview:
+    desc: 'Run the single-pane PDF viewer demo'
+    cmds: ['go run ./examples/pdfview']
 
   build-examples:
     desc: 'Build all examples'
@@ -63,27 +87,29 @@ tasks:
     deps:
       - go-tidy
     cmds:
-      - go build -o bin/ntcharts-pdfview ./examples/pdfview
+      - mkdir -p bin
+      - go build -o bin/ntpdf-pdfview ./examples/pdfview
     sources:
-      - pdfview/**/*.go
+      - '*.go'
       - examples/pdfview/*.go
       - examples/pdfview/testdata/Example.pdf
       - go.mod
     generates:
-      - bin/ntcharts-pdfview
+      - bin/ntpdf-pdfview
 
   build-ex-pagedims:
     desc: 'Build the aspect-matched-cellrect example'
     deps:
       - go-tidy
     cmds:
-      - go build -o bin/ntcharts-pagedims ./examples/pagedims
+      - mkdir -p bin
+      - go build -o bin/ntpdf-pagedims ./examples/pagedims
     sources:
-      - pdfview/**/*.go
+      - '*.go'
       - examples/pagedims/*.go
       - go.mod
     generates:
-      - bin/ntcharts-pagedims
+      - bin/ntpdf-pagedims
 
 ###############################################################################
 # Demo gif (note: Kitty graphics do not render in VHS — this captures the
@@ -104,31 +130,42 @@ tasks:
 ###############################################################################
 # Demo website via booba
 
-  build-wasm-site:
-    desc: 'Build the WASM demo site into web/'
+  build-wasm:
+    desc: 'Build browser WASM demo'
     deps: [go-tidy]
+    env:
+      GOWORK: '{{.ROOT_DIR}}/wasm.work'
+      GOOS: js
+      GOARCH: wasm
+      CGO_ENABLED: '0'
     cmds:
-      - GOARCH=wasm GOOS=js go build -o web/app.wasm ./examples/pdfview/
-      - go tool booba-assets web/
+      - mkdir -p web/demos
+      - go build -o web/demos/pdfview.wasm ./examples/pdfview
+
+  build-wasm-site:
+    desc: 'Build browser demo and export the pinned booba + pdfium runtime into web/'
+    cmds:
+      - task: build-wasm
+      - go tool booba-assets --no-index web
       - go tool booba-shim-assets web/ --shim=pdfium
-    generates:
-      - web/app.wasm
+      - cp LICENSE.txt web/LICENSE
+      - task: check-site
+
+  check-site:
+    desc: 'Check JavaScript syntax, site assets, and smoke-test WASM demo'
+    cmds:
+      - node --check web/site.js
+      - node scripts/check-site.mjs
+      - node scripts/smoke-demo.mjs pdfview
 
   serve-wasm-site:
-    desc: 'Serve web/ at http://localhost:8000/ntcharts-pdf/ (matches GH Pages prefix)'
-    deps: [build-wasm-site]
-    vars:
-      SERVE_DIR: /tmp/ntcharts-pdf-site
+    desc: 'Serve demos at http://localhost:8000/web/'
     cmds:
-      - mkdir -p {{.SERVE_DIR}}
-      - rm -f {{.SERVE_DIR}}/ntcharts-pdf
-      - ln -sfn "$(pwd)/web" {{.SERVE_DIR}}/ntcharts-pdf
-      - echo 'Serving at http://localhost:8000/ntcharts-pdf/'
-      - cd {{.SERVE_DIR}} && python3 -m http.server 8000
+      - task: build-wasm-site
+      - python3 -m http.server 8000 --bind 127.0.0.1
 
   clean-wasm-site:
     desc: 'Remove WASM demo site artifacts'
     cmds:
-      - rm -rf web/booba web/ghostty-web web/booba-shim
-      - rm -f web/wasm_exec.js
-      - rm -f web/app.wasm
+      - rm -rf web/demos web/booba web/ghostty-web web/booba-shim
+      - rm -f web/wasm_exec.js web/app.wasm web/LICENSE

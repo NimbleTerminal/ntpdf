@@ -1,10 +1,11 @@
-package pdfview
+package ntpdf
 
 import (
 	"errors"
 	"image"
 	"image/color"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +13,29 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/ledongthuc/pdf"
 )
+
+// driveCmd recursively executes a Bubble Tea command tree against m.Update.
+func driveCmd(m Model, cmd tea.Cmd) Model {
+	if cmd == nil {
+		return m
+	}
+	msg := cmd()
+	if msg == nil {
+		return m
+	}
+	v := reflect.ValueOf(msg)
+	if v.Kind() == reflect.Slice {
+		for i := 0; i < v.Len(); i++ {
+			if sub, ok := v.Index(i).Interface().(tea.Cmd); ok {
+				m = driveCmd(m, sub)
+			}
+		}
+		return m
+	}
+	var next tea.Cmd
+	m, next = m.Update(msg)
+	return driveCmd(m, next)
+}
 
 func TestNewDefaults(t *testing.T) {
 	m := New(80, 24)
@@ -842,3 +866,73 @@ func TestDynamicDPI(t *testing.T) {
 		t.Errorf("expected calcDynamicDPI to clamp to MaxRenderDPI (300), got %d", dpi)
 	}
 }
+
+func TestNewWithConfig_FitAndAnchor(t *testing.T) {
+	cfg := Config{
+		Fit:    FitCover,
+		Anchor: AnchorTop,
+	}
+	m := NewWithConfig(cfg)
+	if m.Fit() != FitCover {
+		t.Fatalf("expected Fit to be FitCover from Config, got %v", m.Fit())
+	}
+	if m.Anchor() != AnchorTop {
+		t.Fatalf("expected Anchor to be AnchorTop from Config, got %v", m.Anchor())
+	}
+}
+
+func TestNewWithConfig_FitAndAnchor_PictureConfigPrecedence(t *testing.T) {
+	cfg := Config{
+		Fit:    FitCover,
+		Anchor: AnchorTop,
+	}
+	cfg.PictureConfig.Fit = FitFill
+	cfg.PictureConfig.Anchor = AnchorBottom
+	m := NewWithConfig(cfg)
+	if m.Fit() != FitFill {
+		t.Fatalf("expected Fit to be FitFill from PictureConfig, got %v", m.Fit())
+	}
+	if m.Anchor() != AnchorBottom {
+		t.Fatalf("expected Anchor to be AnchorBottom from PictureConfig, got %v", m.Anchor())
+	}
+}
+
+func TestModel_SetFit_Forwards(t *testing.T) {
+	m := New(80, 24)
+	if m.Fit() != FitContain {
+		t.Fatalf("expected initial Fit to be FitContain, got %v", m.Fit())
+	}
+	_ = m.SetFit(FitCover)
+	if m.Fit() != FitCover {
+		t.Fatalf("expected Fit to be FitCover after SetFit, got %v", m.Fit())
+	}
+}
+
+func TestModel_SetAnchor_Forwards(t *testing.T) {
+	m := New(80, 24)
+	if m.Anchor() != AnchorCenter {
+		t.Fatalf("expected initial Anchor to be AnchorCenter, got %v", m.Anchor())
+	}
+	_ = m.SetAnchor(AnchorTop)
+	if m.Anchor() != AnchorTop {
+		t.Fatalf("expected Anchor to be AnchorTop after SetAnchor, got %v", m.Anchor())
+	}
+}
+
+func TestModelDisposeReleasesRendererAndPicture(t *testing.T) {
+	fake := &fakeRenderer{}
+	m := NewWithConfig(Config{Cols: 80, Rows: 24})
+	gen := bump(m.loadGen)
+	m, _ = m.Update(pdfLoadedMsg{
+		path: "/tmp/a.pdf", pages: make([]pdfPage, 1),
+		renderer: fake, gen: gen,
+	})
+	_ = m.Dispose()
+	if fake.closes != 1 {
+		t.Errorf("after Model.Dispose fakeRenderer.closes = %d, want 1", fake.closes)
+	}
+	if m.HasRenderer() {
+		t.Error("HasRenderer() = true after Dispose, want false")
+	}
+}
+

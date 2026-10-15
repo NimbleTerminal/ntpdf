@@ -1,15 +1,15 @@
-// pdfview/pdfium_native.go: go-pdfium (PDFium-via-wazero) renderer for
+// pdfium_native.go: go-pdfium (PDFium-via-wazero) renderer for
 // native builds. CGO-free, zero system dependencies, ships the ~5 MB
 // pdfium.wasm blob inside the Go binary.
 //
 // Build tag excludes browser-WASM targets: wazero needs host syscalls
 // and threading that GOOS=js GOARCH=wasm doesn't provide.
-// DefaultRendererFactory returns nil there (see pdfium_wasm.go), so
-// ImageMode degrades to TextMode in the browser without complaint.
+// DefaultRendererFactory returns nil there (see pdfium_wasi.go), so
+// ImageMode degrades to TextMode under WASI without complaint.
 
 //go:build !wasm
 
-package pdfview
+package ntpdf
 
 import (
 	"errors"
