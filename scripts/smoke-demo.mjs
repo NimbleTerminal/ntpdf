@@ -6,9 +6,23 @@ import vm from 'node:vm';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const demo = process.argv[2];
-assert.ok(['pdfview'].includes(demo));
+assert.ok(['gallery', 'report', 'inspector', 'pagedims', 'pdfview'].includes(demo));
 
 vm.runInThisContext(await readFile('web/wasm_exec.js', 'utf8'));
+globalThis.boobaShim = {
+  pdfium: {
+    ready: Promise.resolve(),
+    loadDocument: async () => 1,
+    closeDocument: () => {},
+    numPages: () => 3,
+    pageSize: () => ({ widthPt: 720, heightPt: 405 }),
+    renderPage: async () => ({
+      data: new Uint8ClampedArray(16 * 16 * 4).fill(200),
+      width: 16,
+      height: 16,
+    }),
+  },
+};
 const go = new Go();
 let exitCode;
 go.exit = code => { exitCode = code; };
@@ -63,10 +77,27 @@ try {
   }
 
   bubbletea_resize(72, 24);
-  if (demo === 'pdfview') {
-    await send('n', 'Viewer: name=Example.pdf page=2/3 mode=text fit=contain zoom=1x');
-    await send('f', 'Viewer: name=Example.pdf page=2/3 mode=text fit=fill zoom=1x');
-    await send('p', 'Viewer: name=Example.pdf page=1/3 mode=text fit=fill zoom=1x');
+  if (demo === 'gallery') {
+    await send('d', 'Gallery: doc=02-telemetry-spec.pdf (2/4) page=1 mode=image fit=contain zoom=1x');
+    await send('m', 'Gallery: doc=02-telemetry-spec.pdf (2/4) page=1 mode=text fit=contain zoom=1x');
+    await send('r', 'Gallery: doc=01-architecture-deck.pdf (1/4) page=1 mode=image fit=contain zoom=1x');
+  } else if (demo === 'report') {
+    await send('t', 'Report: type=line dataset=revenue theme=midnight variant=0 page=1 mode=image');
+    await send('d', 'Report: type=line dataset=latency theme=midnight variant=0 page=1 mode=image');
+    await send('c', 'Report: type=line dataset=latency theme=paper variant=0 page=1 mode=image');
+    await send('r', 'Report: type=bar dataset=revenue theme=midnight variant=0 page=1 mode=image');
+  } else if (demo === 'inspector') {
+    await send('d', 'Inspector: doc=02-telemetry-spec.pdf (2/4) page=1 fit=contain zoom=1x');
+    await send('f', 'Inspector: doc=02-telemetry-spec.pdf (2/4) page=1 fit=fill zoom=1x');
+    await send('r', 'Inspector: doc=01-architecture-deck.pdf (1/4) page=1 fit=contain zoom=1x');
+  } else if (demo === 'pagedims') {
+    await send('a', 'PageDims: page=1 aspect=full mode=image');
+    await send('m', 'PageDims: page=1 aspect=full mode=text');
+    await send('r', 'PageDims: page=1 aspect=locked mode=image');
+  } else if (demo === 'pdfview') {
+    await send('n', 'Viewer: name=Example.pdf page=2/3 mode=image fit=contain zoom=1x');
+    await send('f', 'Viewer: name=Example.pdf page=2/3 mode=image fit=fill zoom=1x');
+    await send('p', 'Viewer: name=Example.pdf page=1/3 mode=image fit=fill zoom=1x');
   }
 
   bubbletea_write(quit.keys[quit.preferred].key);

@@ -113,6 +113,7 @@ type model struct {
 
 func initialModel(cfg ntpdf.Config) model {
 	if runtime.GOOS == "js" {
+		cfg.DefaultMode = ntpdf.ImageMode
 		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
 	}
 	return model{

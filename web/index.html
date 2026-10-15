@@ -3,17 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ntpdf · terminal PDF viewer</title>
+  <title>ntpdf · terminal PDF viewer &amp; report demos</title>
   <link rel="stylesheet" href="site.css?v=1">
 </head>
 <body>
-  <header><a class="brand" href="./">ntpdf<span>Terminal PDF viewer for Bubble Tea.</span></a><a href="https://github.com/nimbleterminal/ntpdf">Source ↗</a></header>
+  <header><a class="brand" href="./">ntpdf<span>Terminal PDF viewer &amp; live report demos.</span></a><a href="https://github.com/nimbleterminal/ntpdf">Source ↗</a></header>
   <main>
     <nav aria-label="Examples">
-      <a href="?demo=pdfview" data-demo="pdfview"><strong>PDF viewer</strong><span>Single-pane viewer with Text and Image modes, zoom, pan, fit policies, and PDFium WASM rendering.</span></a>
+      <a href="?demo=gallery" data-demo="gallery"><strong>Document gallery</strong><span>Browse multi-page PDF decks, specs, and statements across Image and Text modes.</span></a>
+      <a href="?demo=report" data-demo="report"><strong>Live report builder</strong><span>Generate multi-page vector PDF reports and charts in memory with selectable themes and datasets.</span></a>
+      <a href="?demo=inspector" data-demo="inspector"><strong>Side-by-side inspector</strong><span>Split-pane viewer pairing ImageMode rasterization with synchronized TextMode extraction and telemetry.</span></a>
+      <a href="?demo=pagedims" data-demo="pagedims"><strong>Aspect-matched viewport</strong><span>Dynamically size the terminal cell rectangle to 16:9, portrait, and 1:1 page aspect ratios.</span></a>
+      <a href="?demo=pdfview" data-demo="pdfview"><strong>PDF viewer</strong><span>Single-pane viewer with page navigation, zoom, pan, fit modes, and Image/Text mode toggle.</span></a>
     </nav>
     <section class="demo" aria-label="Live terminal example">
-      <div class="toolbar"><h1 id="title">PDF viewer</h1><a id="restart" href="?demo=pdfview">Restart ↻</a></div>
+      <div class="toolbar"><h1 id="title">Document gallery</h1><a id="restart" href="?demo=gallery">Restart ↻</a></div>
       <div id="controls" role="group" aria-label="Terminal controls"></div>
       <div class="terminal-frame"><div id="terminal"></div></div>
       <p id="status" role="status">Starting terminal…</p>

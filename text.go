@@ -232,6 +232,40 @@ func countPageImages(p pdf.Page, maxImages int) int {
 	return count
 }
 
+// TextView renders the current page's spatial text projection and image
+// placeholders into a (cols × rows) cell rectangle without changing the
+// Model's active Mode or Picture placement.
+func (m Model) TextView(cols, rows int) string {
+	m.cols, m.rows = cols, rows
+	if len(m.docPages) == 0 {
+		if m.path != "" {
+			return m.style.Status.Render(fmt.Sprintf("Loading %s…", SanitizeForTerminal(m.path)))
+		}
+		return m.style.Status.Render("No document loaded")
+	}
+	return m.renderTextPage()
+}
+
+// PagePointSize returns the MediaBox dimensions in PDF points (1/72 inch) of
+// the 1-indexed page n. ok is false when n is out of range or no document is
+// loaded.
+func (m Model) PagePointSize(n int) (wPts, hPts float64, ok bool) {
+	if n < 1 || n > len(m.docPages) {
+		return 0, 0, false
+	}
+	mb := m.docPages[n-1].media
+	return mb.width(), mb.height(), true
+}
+
+// PageImageCount returns the number of embedded /Subtype /Image XObjects
+// detected on the 1-indexed page n, or 0 when out of range.
+func (m Model) PageImageCount(n int) int {
+	if n < 1 || n > len(m.docPages) {
+		return 0
+	}
+	return m.docPages[n-1].imageCount
+}
+
 // renderTextPage projects the current page's positioned text runs onto a
 // (cols × rows) cell grid, preserving the document's spatial layout.
 // Each run's leading character is placed at its projected (col, row);

@@ -33,12 +33,12 @@ tasks:
       - go mod tidy
 
   test:
-    desc: 'Run fast Go unit tests'
+    desc: 'Run all Go tests'
     cmds:
       - go test ./...
 
-  test-all:
-    desc: 'Run all Go tests including wazero integration'
+  test-integration:
+    desc: 'Run integration tests including PDFium rendering'
     cmds:
       - go test -tags=integration ./...
 
@@ -72,15 +72,34 @@ tasks:
 ###############################################################################
 # Examples
 
+  run-gallery:
+    desc: 'Run the multi-document PDF gallery demo'
+    cmds: ['go run ./examples/gallery']
+
+  run-report:
+    desc: 'Run the live PDF report builder demo'
+    cmds: ['go run ./examples/report']
+
+  run-inspector:
+    desc: 'Run the side-by-side Image + Text PDF inspector demo'
+    cmds: ['go run ./examples/inspector']
+
+  run-pagedims:
+    desc: 'Run the aspect-matched viewport demo'
+    cmds: ['go run ./examples/pagedims']
+
   run-pdfview:
     desc: 'Run the single-pane PDF viewer demo'
     cmds: ['go run ./examples/pdfview']
 
   build-examples:
-    desc: 'Build all examples'
+    desc: 'Build all native demos'
     deps:
-      - build-ex-pdfview
-      - build-ex-pagedims
+      - go-tidy
+    cmds:
+      - mkdir -p bin
+      - for: [gallery, report, inspector, pagedims, pdfview]
+        cmd: go build -o bin/ntpdf-{{.ITEM}} ./examples/{{.ITEM}}
 
   build-ex-pdfview:
     desc: 'Build the pdfview example'
@@ -89,31 +108,54 @@ tasks:
     cmds:
       - mkdir -p bin
       - go build -o bin/ntpdf-pdfview ./examples/pdfview
-    sources:
-      - '*.go'
-      - examples/pdfview/*.go
-      - examples/pdfview/testdata/Example.pdf
-      - go.mod
-    generates:
-      - bin/ntpdf-pdfview
-
-  build-ex-pagedims:
-    desc: 'Build the aspect-matched-cellrect example'
-    deps:
-      - go-tidy
-    cmds:
-      - mkdir -p bin
-      - go build -o bin/ntpdf-pagedims ./examples/pagedims
-    sources:
-      - '*.go'
-      - examples/pagedims/*.go
-      - go.mod
-    generates:
-      - bin/ntpdf-pagedims
 
 ###############################################################################
-# Demo gif (note: Kitty graphics do not render in VHS — this captures the
-# half-block path only; do a hand-made recording for Kitty-mode demos).
+# Demo website via booba
+
+  build-wasm:
+    desc: 'Build all browser WASM demos'
+    deps: [go-tidy]
+    env:
+      GOWORK: '{{.ROOT_DIR}}/wasm.work'
+      GOOS: js
+      GOARCH: wasm
+      CGO_ENABLED: '0'
+    cmds:
+      - mkdir -p web/demos
+      - for: [gallery, report, inspector, pagedims, pdfview]
+        cmd: go build -o web/demos/{{.ITEM}}.wasm ./examples/{{.ITEM}}
+
+  build-wasm-site:
+    desc: 'Build browser demos and export the pinned booba runtime into web/'
+    cmds:
+      - task: build-wasm
+      - go tool booba-assets --no-index web
+      - go tool booba-shim-assets web/ --shim=pdfium
+      - cp LICENSE.txt web/LICENSE
+      - task: check-site
+
+  check-site:
+    desc: 'Check JavaScript syntax, site assets, and smoke-test all WASM demos'
+    cmds:
+      - node --check web/site.js
+      - node scripts/check-site.mjs
+      - for: [gallery, report, inspector, pagedims, pdfview]
+        cmd: node scripts/smoke-demo.mjs {{.ITEM}}
+
+  serve-wasm-site:
+    desc: 'Serve demos at http://localhost:8000/web/'
+    cmds:
+      - task: build-wasm-site
+      - python3 -m http.server 8000 --bind 127.0.0.1
+
+  clean-wasm-site:
+    desc: 'Remove generated WASM demo site artifacts'
+    cmds:
+      - rm -rf web/demos web/booba web/ghostty-web web/booba-shim
+      - rm -f web/wasm_exec.js web/app.wasm web/LICENSE
+
+###############################################################################
+# Demo gif
 
   vhs-validate:
     desc: 'Validate vhs tape file'
@@ -126,46 +168,3 @@ tasks:
       - build-ex-pdfview
     cmds:
       - vhs --output ./examples/pdfview/demo.gif ./examples/pdfview/demo.tape
-
-###############################################################################
-# Demo website via booba
-
-  build-wasm:
-    desc: 'Build browser WASM demo'
-    deps: [go-tidy]
-    env:
-      GOWORK: '{{.ROOT_DIR}}/wasm.work'
-      GOOS: js
-      GOARCH: wasm
-      CGO_ENABLED: '0'
-    cmds:
-      - mkdir -p web/demos
-      - go build -o web/demos/pdfview.wasm ./examples/pdfview
-
-  build-wasm-site:
-    desc: 'Build browser demo and export the pinned booba + pdfium runtime into web/'
-    cmds:
-      - task: build-wasm
-      - go tool booba-assets --no-index web
-      - go tool booba-shim-assets web/ --shim=pdfium
-      - cp LICENSE.txt web/LICENSE
-      - task: check-site
-
-  check-site:
-    desc: 'Check JavaScript syntax, site assets, and smoke-test WASM demo'
-    cmds:
-      - node --check web/site.js
-      - node scripts/check-site.mjs
-      - node scripts/smoke-demo.mjs pdfview
-
-  serve-wasm-site:
-    desc: 'Serve demos at http://localhost:8000/web/'
-    cmds:
-      - task: build-wasm-site
-      - python3 -m http.server 8000 --bind 127.0.0.1
-
-  clean-wasm-site:
-    desc: 'Remove WASM demo site artifacts'
-    cmds:
-      - rm -rf web/demos web/booba web/ghostty-web web/booba-shim
-      - rm -f web/wasm_exec.js web/app.wasm web/LICENSE

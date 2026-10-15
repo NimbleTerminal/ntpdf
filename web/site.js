@@ -2,13 +2,21 @@ import { BoobaTerminal, installActionBar, installRendererHud, parseRendererFromU
 import './booba-shim/pdfium/pdfium-shim.js';
 
 const demos = {
+  gallery: 'Document gallery',
+  report: 'Live report builder',
+  inspector: 'Side-by-side inspector',
+  pagedims: 'Aspect-matched viewport',
   pdfview: 'PDF viewer',
 };
 const help = {
-  pdfview: 'n/p: next/prev page · m: text/image · f: fit mode · +/-: zoom · arrows: pan · g: glyph/kitty · 0: reset · q: quit.',
+  gallery: 'd: next doc · n/p: next/prev page · m: image/text · f: fit mode · +/-: zoom · arrows: pan · g: glyph/kitty · r: reset · q: quit.',
+  report: 't: bar/line · d: dataset · c: theme · v: vary values · n/p: page · m: image/text · f: fit mode · g: glyph/kitty · r: reset · q: quit.',
+  inspector: 'd: next doc · n/p: next/prev page · f: fit mode · +/-: zoom · arrows: pan · g: glyph/kitty · r: reset · q: quit.',
+  pagedims: 'n/p: next/prev page (16:9 / Letter / 1:1) · a: aspect lock · m: image/text · g: glyph/kitty · r: reset · q: quit.',
+  pdfview: 'n/p: next/prev page · m: image/text · f: fit mode · +/-: zoom · arrows: pan · g: glyph/kitty · r: reset · q: quit.',
 };
 const requested = new URLSearchParams(location.search).get('demo');
-const demo = Object.hasOwn(demos, requested) ? requested : 'pdfview';
+const demo = Object.hasOwn(demos, requested) ? requested : 'gallery';
 const status = document.querySelector('#status');
 document.querySelector('#title').textContent = demos[demo];
 document.title = `${demos[demo]} · ntpdf`;
@@ -25,7 +33,13 @@ function failed(error) {
   console.error(error);
 }
 async function main() {
-  const pdfiumReady = window.boobaShim?.pdfium?.ready;
+  status.textContent = 'Initializing PDFium renderer…';
+  try {
+    await window.boobaShim?.pdfium?.ready;
+  } catch (err) {
+    console.warn('PDFium init failed (ImageMode will fall back to TextMode):', err);
+  }
+  status.textContent = 'Starting terminal…';
   const go = new Go();
   const response = await fetch(`demos/${demo}.wasm`);
   if (!response.ok) throw new Error(`Download failed (${response.status})`);
@@ -52,7 +66,6 @@ async function main() {
     position: 'absolute',
     bindToggleHotkey: false,
   });
-  pdfiumReady?.catch(err => console.error('PDFium init failed:', err));
   status.textContent = 'Running locally in your browser. No terminal server required.';
 }
 main().catch(failed);

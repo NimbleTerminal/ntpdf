@@ -936,3 +936,34 @@ func TestModelDisposeReleasesRendererAndPicture(t *testing.T) {
 	}
 }
 
+func TestModelTextViewAndPagePointSize(t *testing.T) {
+	m := NewWithConfig(Config{Cols: 80, Rows: 24, DefaultMode: ImageMode})
+	gen := bump(m.loadGen)
+	m, _ = m.Update(pdfLoadedMsg{
+		path: "deck.pdf",
+		pages: []pdfPage{
+			{
+				media:      mediaBox{x0: 0, y0: 0, x1: 720, y1: 405},
+				imageCount: 2,
+			},
+		},
+		gen: gen,
+	})
+	wPts, hPts, ok := m.PagePointSize(1)
+	if !ok || wPts != 720 || hPts != 405 {
+		t.Fatalf("PagePointSize(1) = (%v, %v, %v), want (720, 405, true)", wPts, hPts, ok)
+	}
+	if _, _, ok := m.PagePointSize(2); ok {
+		t.Fatal("PagePointSize(2) = ok, want false for out-of-range page")
+	}
+	if got := m.PageImageCount(1); got != 2 {
+		t.Fatalf("PageImageCount(1) = %d, want 2", got)
+	}
+	txt := m.TextView(40, 12)
+	if !strings.Contains(txt, "image 1") || !strings.Contains(txt, "image 2") {
+		t.Fatalf("TextView missing image placeholders: %q", txt)
+	}
+	if m.Mode() != ImageMode {
+		t.Fatalf("TextView mutated active Mode to %v, want ImageMode", m.Mode())
+	}
+}

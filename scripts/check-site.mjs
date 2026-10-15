@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
 
-const demos = ['pdfview'];
+const demos = ['gallery', 'report', 'inspector', 'pagedims', 'pdfview'];
 
 for (const file of [
   'index.html', 'site.css', 'site.js', 'wasm_exec.js', 'booba/booba.js',
@@ -16,6 +16,9 @@ for (const demo of demos) {
   assert.deepEqual([...bytes.subarray(0, 4)], [0, 97, 115, 109], `${demo}: WASM header`);
   assert.ok(WebAssembly.validate(bytes), `${demo}: valid WASM`);
 }
+
+const siteJs = await readFile('web/site.js', 'utf8');
+assert.ok(siteJs.includes("import './booba-shim/pdfium/pdfium-shim.js';"), 'pdfium-shim side-effect import');
 
 const html = await readFile('web/index.html', 'utf8');
 for (const [, path] of html.matchAll(/(?:src|href)="([^"?#]+)"/g)) {

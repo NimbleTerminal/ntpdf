@@ -60,23 +60,26 @@ Page with `n` / `p`, toggle Text ↔ Image with `m`, swap Glyph ↔ Kitty with `
 
 ## Demos
 
-Building requires Go 1.26.8 or newer.
+Building requires Go 1.26.8 or newer. See [`examples/README.md`](./examples/README.md) for the full list of controls.
 
+- **`task run-gallery`** ([`examples/gallery`](./examples/gallery/main.go)) — browse embedded multi-page PDF decks, specs, and statements across Image and Text modes, fit policies, and zoom levels.
+- **`task run-report`** ([`examples/report`](./examples/report/main.go)) — live multi-page vector PDF report builder with selectable datasets, bar/line charts, and color themes.
+- **`task run-inspector`** ([`examples/inspector`](./examples/inspector/main.go)) — split-pane viewer pairing `ImageMode` rasterization with synchronized `TextMode` extraction and live telemetry (`TextView`, `PagePointSize`, `PageDimensions`, `RasterGeometry`).
+- **`task run-pagedims`** ([`examples/pagedims`](./examples/pagedims/main.go)) — aspect-matched cell-rectangle demo across `16:9` widescreen, portrait US Letter, and `1:1` square pages.
 - **`task run-pdfview`** ([`examples/pdfview`](./examples/pdfview/main.go)) — single-pane CLI viewer (`./bin/ntpdf-pdfview [path.pdf]`) with a status bar, help bubble, and reload key.
-- **`./bin/ntpdf-pagedims`** ([`examples/pagedims`](./examples/pagedims/main.go)) — aspect-matched cell-rectangle demo using `Model.PageDimensions`.
 
 ```sh
 task build-examples
 ./bin/ntpdf-pdfview path/to/your.pdf
 ```
 
-The `pdfview` example also compiles to WebAssembly and runs in the browser via [`booba`](https://github.com/NimbleMarkets/go-booba), publishing its key bindings as interactive action buttons above the terminal:
+All five examples also compile to WebAssembly and run in the browser via [`booba`](https://github.com/NimbleMarkets/go-booba), publishing their key bindings as interactive action buttons above the terminal:
 
 ```sh
-task serve-wasm-site   # builds web/demos/pdfview.wasm, stages booba + pdfium assets, serves http://localhost:8000/web/
+task serve-wasm-site   # builds web/demos/*.wasm, stages booba + pdfium assets, serves http://localhost:8000/web/
 ```
 
-The browser demo uses booba v0.9.2 and requests `ntpicture`'s Kitty shared-memory transport, passing raw RGBA frames without PNG encoding or base64 image payloads, and falling back to direct PNG when the browser bridge is unavailable. Call `Model.Dispose()` (returning the terminal placement cleanup `tea.Cmd`) or `Model.Close()` when disposing the widget.
+The browser demos use booba v0.9.2 and request `ntpicture`'s Kitty shared-memory transport, passing raw RGBA frames without PNG encoding or base64 image payloads, and falling back to direct PNG when the browser bridge is unavailable. Call `Model.Dispose()` (returning the terminal placement cleanup `tea.Cmd`) or `Model.Close()` when disposing the widget.
 
 ## Modes
 
