@@ -27,7 +27,6 @@ type model struct {
 	samples       []pdfdoc.Sample
 	docIdx        int
 	width, height int
-	preferKitty   bool
 }
 
 func newModel() model {
@@ -38,14 +37,14 @@ func newModel() model {
 		InitialName: samples[0].Name,
 		DynamicDPI:  runtime.GOOS != "js",
 	}
+	cfg.PictureOptions.AutoMode = true
 	if runtime.GOOS == "js" {
 		cfg.RenderDPI = 120
 		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
 	}
 	return model{
-		pv:          ntpdf.NewWithConfig(cfg),
-		samples:     samples,
-		preferKitty: true,
+		pv:      ntpdf.NewWithConfig(cfg),
+		samples: samples,
 	}
 }
 
@@ -108,9 +107,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if demohelp.Quit(msg) {
 			return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
 		}
-		if key.Matches(msg, m.pv.KeyMap().ToggleRender) {
-			m.preferKitty = false
-		}
 		switch msg.String() {
 		case "d", "tab":
 			return m, m.selectDoc(m.docIdx + 1)
@@ -128,12 +124,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.pv, cmd = m.pv.Update(msg)
-	if m.preferKitty && m.pv.KittySupported() == picture.KittyCapabilitySupported {
-		m.preferKitty = false
-		if m.pv.RenderMode() != ntpdf.RenderKitty {
-			cmd = tea.Batch(cmd, m.pv.ToggleRenderMode())
-		}
-	}
 	return m, cmd
 }
 

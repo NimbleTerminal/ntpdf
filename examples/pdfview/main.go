@@ -108,19 +108,18 @@ type model struct {
 	help          help.Model
 	keys          appKeys
 	width, height int
-	preferKitty   bool
 }
 
 func initialModel(cfg ntpdf.Config) model {
+	cfg.PictureOptions.AutoMode = true
 	if runtime.GOOS == "js" {
 		cfg.DefaultMode = ntpdf.ImageMode
 		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
 	}
 	return model{
-		pv:          ntpdf.NewWithConfig(cfg),
-		help:        help.New(),
-		keys:        newAppKeys(),
-		preferKitty: true,
+		pv:   ntpdf.NewWithConfig(cfg),
+		help: help.New(),
+		keys: newAppKeys(),
 	}
 }
 
@@ -184,9 +183,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.resize()
 
 	case tea.KeyMsg:
-		if key.Matches(msg, m.pv.KeyMap().ToggleRender) {
-			m.preferKitty = false
-		}
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
@@ -215,12 +211,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.pv, cmd = m.pv.Update(msg)
-	if m.preferKitty && m.pv.KittySupported() == picture.KittyCapabilitySupported {
-		m.preferKitty = false
-		if m.pv.RenderMode() != ntpdf.RenderKitty {
-			cmd = tea.Batch(cmd, m.pv.ToggleRenderMode())
-		}
-	}
 	return m, cmd
 }
 

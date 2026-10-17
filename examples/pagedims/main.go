@@ -33,24 +33,23 @@ var (
 )
 
 type model struct {
-	pv          ntpdf.Model
-	aspectLock  bool
-	preferKitty bool
-	width       int
-	height      int
-	cols        int
-	rows        int
+	pv         ntpdf.Model
+	aspectLock bool
+	width      int
+	height     int
+	cols       int
+	rows       int
 }
 
 func newModel(cfg ntpdf.Config) model {
+	cfg.PictureOptions.AutoMode = true
 	if runtime.GOOS == "js" {
 		cfg.RenderDPI = 120
 		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
 	}
 	return model{
-		pv:          ntpdf.NewWithConfig(cfg),
-		aspectLock:  true,
-		preferKitty: true,
+		pv:         ntpdf.NewWithConfig(cfg),
+		aspectLock: true,
 	}
 }
 
@@ -108,7 +107,14 @@ func (m model) aspectCellrect() (cols, rows int) {
 		return bodyW, bodyH
 	}
 
-	pageCellAR := (srcW * defaultCellPixelH) / (srcH * defaultCellPixelW)
+	cellW, cellH := m.pv.CellPixelSize()
+	if cellW <= 0 {
+		cellW = defaultCellPixelW
+	}
+	if cellH <= 0 {
+		cellH = defaultCellPixelH
+	}
+	pageCellAR := (srcW * float64(cellH)) / (srcH * float64(cellW))
 	bodyCellAR := float64(bodyW) / float64(bodyH)
 	if pageCellAR >= bodyCellAR {
 		return bodyW, max(1, int(float64(bodyW)/pageCellAR))
@@ -126,9 +132,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if demohelp.Quit(msg) {
 			return m, tea.Sequence(m.pv.Dispose(), tea.Quit)
-		}
-		if key.Matches(msg, m.pv.KeyMap().ToggleRender) {
-			m.preferKitty = false
 		}
 		switch msg.String() {
 		case "a":
@@ -150,12 +153,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.pv, cmd = m.pv.Update(msg)
 	if rectCmd := m.syncRect(); rectCmd != nil {
 		cmd = tea.Batch(cmd, rectCmd)
-	}
-	if m.preferKitty && m.pv.KittySupported() == picture.KittyCapabilitySupported {
-		m.preferKitty = false
-		if m.pv.RenderMode() != ntpdf.RenderKitty {
-			cmd = tea.Batch(cmd, m.pv.ToggleRenderMode())
-		}
 	}
 	return m, cmd
 }

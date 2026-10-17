@@ -23,19 +23,23 @@ tasks:
     run: once
     cmds:
       - go mod tidy
+      - go -C examples mod tidy
 
   go-update:
     desc: 'Go update all the dependencies'
     run: once
     cmds:
       - go get -u ./...
-      - go get -u tool
+      - go -C examples get -u ./...
+      - go -C examples get -u tool
       - go mod tidy
+      - go -C examples mod tidy
 
   test:
     desc: 'Run all Go tests'
     cmds:
       - go test ./...
+      - go -C examples test ./...
 
   test-integration:
     desc: 'Run integration tests including PDFium rendering'
@@ -49,12 +53,13 @@ tasks:
       GOOS: js
       GOARCH: wasm
     cmds:
-      - 'go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./...'
+      - 'go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./... ./examples/...'
 
   vet:
     desc: 'Run go vet'
     cmds:
       - go vet ./...
+      - go -C examples vet ./...
 
   build:
     desc: 'Build library and native examples'
@@ -74,23 +79,23 @@ tasks:
 
   run-gallery:
     desc: 'Run the multi-document PDF gallery demo'
-    cmds: ['go run ./examples/gallery']
+    cmds: ['go -C examples run ./gallery']
 
   run-report:
     desc: 'Run the live PDF report builder demo'
-    cmds: ['go run ./examples/report']
+    cmds: ['go -C examples run ./report']
 
   run-inspector:
     desc: 'Run the side-by-side Image + Text PDF inspector demo'
-    cmds: ['go run ./examples/inspector']
+    cmds: ['go -C examples run ./inspector']
 
   run-pagedims:
     desc: 'Run the aspect-matched viewport demo'
-    cmds: ['go run ./examples/pagedims']
+    cmds: ['go -C examples run ./pagedims']
 
   run-pdfview:
     desc: 'Run the single-pane PDF viewer demo'
-    cmds: ['go run ./examples/pdfview']
+    cmds: ['go -C examples run ./pdfview']
 
   build-examples:
     desc: 'Build all native demos'
@@ -99,7 +104,7 @@ tasks:
     cmds:
       - mkdir -p bin
       - for: [gallery, report, inspector, pagedims, pdfview]
-        cmd: go build -o bin/ntpdf-{{.ITEM}} ./examples/{{.ITEM}}
+        cmd: go -C examples build -o ../bin/ntpdf-{{.ITEM}} ./{{.ITEM}}
 
   build-ex-pdfview:
     desc: 'Build the pdfview example'
@@ -107,7 +112,7 @@ tasks:
       - go-tidy
     cmds:
       - mkdir -p bin
-      - go build -o bin/ntpdf-pdfview ./examples/pdfview
+      - go -C examples build -o ../bin/ntpdf-pdfview ./pdfview
 
 ###############################################################################
 # Demo website via booba
@@ -123,14 +128,14 @@ tasks:
     cmds:
       - mkdir -p web/demos
       - for: [gallery, report, inspector, pagedims, pdfview]
-        cmd: go build -o web/demos/{{.ITEM}}.wasm ./examples/{{.ITEM}}
+        cmd: go -C examples build -o ../web/demos/{{.ITEM}}.wasm ./{{.ITEM}}
 
   build-wasm-site:
     desc: 'Build browser demos and export the pinned booba runtime into web/'
     cmds:
       - task: build-wasm
-      - go tool booba-assets --no-index web
-      - go tool booba-shim-assets web/ --shim=pdfium
+      - go -C examples tool booba-assets --no-index ../web
+      - go -C examples tool booba-shim-assets ../web/ --shim=pdfium
       - cp LICENSE.txt web/LICENSE
       - task: check-site
 

@@ -30,6 +30,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
+            examples/go.sum
             wasm.work.sum
       - uses: actions/setup-node@v7
         with:
@@ -37,11 +38,11 @@ jobs:
       - name: Build WASM demo
         run: |
           mkdir -p web/demos
-          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go build -o web/demos/pdfview.wasm ./examples/pdfview
+          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go -C examples build -o ../web/demos/pdfview.wasm ./pdfview
       - name: Set up web assets
         run: |
-          go tool booba-assets --no-index web
-          go tool booba-shim-assets web/ --shim=pdfium
+          go -C examples tool booba-assets --no-index ../web
+          go -C examples tool booba-shim-assets ../web/ --shim=pdfium
           cp LICENSE.txt web/LICENSE
       - name: Check site and smoke-test WASM demo
         run: |

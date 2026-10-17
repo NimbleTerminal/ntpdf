@@ -26,6 +26,7 @@ package ntpdf
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"sync"
 
 	"charm.land/bubbles/v2/key"
@@ -41,9 +42,6 @@ type Model struct {
 	style Styles
 
 	pic        *picture.Picture
-	picClosed  *bool
-	fit        FitMode
-	anchor     FitAnchor
 	cols, rows int
 
 	path string
@@ -57,10 +55,10 @@ type Model struct {
 	// sourceImage is the un-cropped image returned by the most recent
 	// Renderer.RenderPage call (or SetPageImage). nil until the first
 	// successful render for the current document. Cropped on demand to
-	// the (zoom, panX, panY) viewport before being handed to picture.Picture.
-	sourceImage     image.Image
-	sourceImmutable bool
-	presentedImage  image.Image
+	// the (zoom, panX, panY) viewport via picture.Picture.SetCrop.
+	sourceImage          image.Image
+	sourceImmutable      bool
+	sourceImagePresented bool
 
 	// Viewport state. zoom 0 means "fit the whole page to the cell rect"
 	// (no crop). zoom N (N >= 1) means crop the source to a 1/(2^N) ×
@@ -137,26 +135,31 @@ func NewWithConfig(cfg Config) Model {
 		styles = *cfg.Styles
 	}
 
+	if cfg.PictureConfig == (picture.Config{}) && cfg.PictureOptions.Render != (picture.Config{}) {
+		cfg.PictureConfig = cfg.PictureOptions.Render
+	}
 	if cfg.Fit != 0 && cfg.PictureConfig.Fit == 0 {
 		cfg.PictureConfig.Fit = cfg.Fit
 	}
 	if cfg.Anchor != 0 && cfg.PictureConfig.Anchor == 0 {
 		cfg.PictureConfig.Anchor = cfg.Anchor
 	}
+	if cfg.CellPixelWidth > 0 && cfg.PictureConfig.CellPixelWidth == 0 {
+		cfg.PictureConfig.CellPixelWidth = cfg.CellPixelWidth
+	}
+	if cfg.CellPixelHeight > 0 && cfg.PictureConfig.CellPixelHeight == 0 {
+		cfg.PictureConfig.CellPixelHeight = cfg.CellPixelHeight
+	}
 
 	var lg, rg uint64
-	var closed bool
 	m := Model{
-		cfg:       cfg,
-		keys:      DefaultKeyMap(),
-		style:     styles,
-		picClosed: &closed,
-		fit:       cfg.PictureConfig.Fit,
-		anchor:    cfg.PictureConfig.Anchor,
-		cols:      cfg.Cols,
-		rows:      cfg.Rows,
-		mode:      cfg.DefaultMode,
-		page:      cfg.InitialPage,
+		cfg:   cfg,
+		keys:  DefaultKeyMap(),
+		style: styles,
+		cols:  cfg.Cols,
+		rows:  cfg.Rows,
+		mode:  cfg.DefaultMode,
+		page:  cfg.InitialPage,
 		// path is the in-flight display label. Seed it from whichever
 		// initial source will actually be loaded so View() can show
 		// "Loading <name>…" or surface an error while the async load
@@ -177,42 +180,75 @@ func (m *Model) newPicture() *picture.Picture {
 	if renderCfg == (picture.Config{}) && opts.Render != (picture.Config{}) {
 		renderCfg = opts.Render
 	}
-	renderCfg.Fit = m.fit
-	renderCfg.Anchor = m.anchor
+	if m.cfg.CellPixelWidth > 0 && renderCfg.CellPixelWidth == 0 {
+		renderCfg.CellPixelWidth = m.cfg.CellPixelWidth
+	}
+	if m.cfg.CellPixelHeight > 0 && renderCfg.CellPixelHeight == 0 {
+		renderCfg.CellPixelHeight = m.cfg.CellPixelHeight
+	}
 	opts.Render = renderCfg
 	p := picture.New(opts)
 	_ = p.SetSize(m.cols, m.rows)
-	if m.picClosed != nil {
-		*m.picClosed = false
-	}
 	return p
 }
 
 func (m *Model) ensurePicture() {
-	if m.pic == nil || (m.picClosed != nil && *m.picClosed) {
+	if m.pic.Closed() {
 		var mode picture.PictureMode
+		var autoMode bool
 		var cw, ch int
+		var cap picture.KittyCapability
+		var vp picture.Viewport
+		var hasVP bool
+		visible := true
 		if m.pic != nil {
 			mode = m.pic.Mode()
+			autoMode = m.pic.AutoMode()
 			cw, ch = m.pic.CellPixelSize()
+			cap = m.pic.KittySupported()
+			visible = m.pic.Visible()
+			vp, hasVP = m.pic.Viewport()
+			m.cfg.PictureConfig.Fit = m.pic.Fit()
+			m.cfg.PictureConfig.Anchor = m.pic.Anchor()
+			m.cfg.PictureConfig.Background = m.pic.Background()
+			m.cfg.PictureConfig.KittyResolutionFactor = m.pic.Resolution()
+			m.cfg.PictureConfig.MaxRasterPixels = m.pic.MaxRasterPixels()
+			m.cfg.PictureOptions.AutoMode = autoMode
 		}
 		m.pic = m.newPicture()
+		m.sourceImagePresented = false
+		if cap != picture.KittyCapabilityUnknown {
+			_ = m.pic.SetKittyCapability(cap)
+		}
 		if cw > 0 && ch > 0 {
-			_ = m.pic.SetTerminal(mode == picture.PictureKitty, cw, ch)
+			if autoMode {
+				_ = m.pic.SetCellSize(cw, ch)
+			} else {
+				_ = m.pic.SetTerminal(mode == picture.PictureKitty, cw, ch)
+			}
+		}
+		if !visible {
+			_ = m.pic.SetVisible(false)
+		}
+		if hasVP {
+			m.pic.SetViewport(vp)
 		}
 	}
 }
 
 func (m *Model) presentImage(img image.Image, immutable bool) tea.Cmd {
+	return m.presentImageCropped(img, image.Rectangle{}, immutable)
+}
+
+func (m *Model) presentImageCropped(img image.Image, crop image.Rectangle, immutable bool) tea.Cmd {
 	m.ensurePicture()
-	m.presentedImage = img
 	if img == nil {
-		return m.pic.SetImage(nil)
+		return m.pic.SetImageImmutableCropped(nil, image.Rectangle{})
 	}
 	if immutable {
-		return m.pic.SetImageImmutable(img)
+		return m.pic.SetImageImmutableCropped(img, crop)
 	}
-	return m.pic.SetImage(img)
+	return m.pic.SetImageCropped(img, crop)
 }
 
 // Mode returns the current rendering mode.
@@ -221,7 +257,12 @@ func (m Model) Mode() Mode { return m.mode }
 // RenderMode returns the underlying picture protocol used by ImageMode.
 func (m Model) RenderMode() RenderMode { return m.pic.Mode() }
 
-// SetRenderMode explicitly sets the underlying picture protocol (Glyph or Kitty).
+// AutoRenderMode reports whether the underlying picture automatically selects
+// RenderKitty or RenderGlyph from its terminal session capability.
+func (m Model) AutoRenderMode() bool { return m.pic.AutoMode() }
+
+// SetRenderMode explicitly sets the underlying picture protocol (RenderGlyph,
+// RenderKitty, or RenderAuto).
 func (m *Model) SetRenderMode(mode RenderMode) tea.Cmd {
 	m.ensurePicture()
 	return m.pic.SetMode(mode)
@@ -231,14 +272,123 @@ func (m *Model) SetRenderMode(mode RenderMode) tea.Cmd {
 // to the underlying picture.Picture without probing.
 func (m *Model) SetTerminal(kitty bool, cellWidth, cellHeight int) tea.Cmd {
 	m.ensurePicture()
-	return m.pic.SetTerminal(kitty, cellWidth, cellHeight)
+	if cellWidth > 0 {
+		m.cfg.CellPixelWidth = cellWidth
+	}
+	if cellHeight > 0 {
+		m.cfg.CellPixelHeight = cellHeight
+	}
+	cmd := m.pic.SetTerminal(kitty, cellWidth, cellHeight)
+	if m.cfg.DynamicDPI && m.mode == ImageMode && m.path != "" && m.page > 0 {
+		return tea.Batch(cmd, m.renderPageCmd(m.page))
+	}
+	return cmd
 }
+
+// SetCellSize updates cell pixel dimensions on the underlying picture.Picture
+// while preserving the current rendering mode and AutoMode setting.
+func (m *Model) SetCellSize(cellWidth, cellHeight int) tea.Cmd {
+	m.ensurePicture()
+	if cellWidth > 0 {
+		m.cfg.CellPixelWidth = cellWidth
+	}
+	if cellHeight > 0 {
+		m.cfg.CellPixelHeight = cellHeight
+	}
+	cmd := m.pic.SetCellSize(cellWidth, cellHeight)
+	if m.cfg.DynamicDPI && m.mode == ImageMode && m.path != "" && m.page > 0 {
+		return tea.Batch(cmd, m.renderPageCmd(m.page))
+	}
+	return cmd
+}
+
+// CellPixelSize reports the active terminal cell pixel dimensions (width, height).
+func (m Model) CellPixelSize() (int, int) {
+	if m.pic != nil {
+		return m.pic.CellPixelSize()
+	}
+	return 8, 16
+}
+
+// SetKittyCapability updates the terminal session's Kitty capability on the
+// underlying picture.Picture while preserving AutoMode.
+func (m *Model) SetKittyCapability(cap picture.KittyCapability) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetKittyCapability(cap)
+}
+
+// Resolution reports the configured Kitty raster resolution factor in (0, 1].
+func (m Model) Resolution() float64 { return m.pic.Resolution() }
 
 // SetResolution sets the Kitty raster resolution factor in (0, 1] on the
 // underlying picture.Picture.
 func (m *Model) SetResolution(factor float64) tea.Cmd {
 	m.ensurePicture()
 	return m.pic.SetResolution(factor)
+}
+
+// MaxRasterPixels reports the configured Kitty raster pixel cap (0 when uncapped).
+func (m Model) MaxRasterPixels() int { return m.pic.MaxRasterPixels() }
+
+// SetMaxRasterPixels sets the Kitty raster pixel cap on the underlying
+// picture.Picture. Zero or negative removes the cap.
+func (m *Model) SetMaxRasterPixels(maxPixels int) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetMaxRasterPixels(maxPixels)
+}
+
+// Background reports the configured background color of the underlying
+// picture.Picture.
+func (m Model) Background() color.Color { return m.pic.Background() }
+
+// SetBackground changes the color composited behind translucent pixels and
+// letterbox areas on the underlying picture.Picture.
+func (m *Model) SetBackground(c color.Color) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetBackground(c)
+}
+
+// Visible reports whether the underlying picture.Picture is currently visible.
+func (m Model) Visible() bool { return m.pic.Visible() }
+
+// SetVisible hides or shows the underlying picture.Picture placement while
+// retaining source pixels.
+func (m *Model) SetVisible(visible bool) tea.Cmd {
+	m.ensurePicture()
+	return m.pic.SetVisible(visible)
+}
+
+// Size reports the configured cell dimensions (cols, rows).
+func (m Model) Size() (cols, rows int) {
+	if m.pic != nil {
+		return m.pic.Size()
+	}
+	return m.cols, m.rows
+}
+
+// Crop reports the active source-pixel crop rectangle on the underlying
+// picture.Picture (empty when uncropped).
+func (m Model) Crop() image.Rectangle { return m.pic.Crop() }
+
+// SetViewport clips the underlying picture.Picture's View to v, measured in
+// picture cells from the top-left of SetSize.
+func (m *Model) SetViewport(v Viewport) {
+	m.ensurePicture()
+	m.pic.SetViewport(v)
+}
+
+// ResetViewport clears any cell viewport set by SetViewport on the underlying
+// picture.Picture.
+func (m *Model) ResetViewport() {
+	if m.pic != nil {
+		m.pic.ResetViewport()
+	}
+}
+
+// Viewport reports the active cell viewport on the underlying picture.Picture
+// and whether one is set.
+func (m Model) Viewport() (Viewport, bool) {
+	return m.pic.Viewport()
 }
 
 // RasterGeometry returns the target cell and pixel geometry of the underlying
@@ -251,6 +401,24 @@ func (m Model) RasterGeometry() picture.RasterGeometry {
 // underlying picture.Picture.
 func (m Model) PictureStatus() picture.Status {
 	return m.pic.Status()
+}
+
+// Session returns the TerminalSession associated with the underlying
+// picture.Picture.
+func (m Model) Session() *picture.TerminalSession {
+	if m.pic != nil {
+		return m.pic.Session()
+	}
+	return nil
+}
+
+// TerminalState returns a snapshot of the terminal session associated with the
+// underlying picture.Picture.
+func (m Model) TerminalState() picture.TerminalState {
+	if m.pic != nil {
+		return m.pic.TerminalState()
+	}
+	return picture.TerminalState{}
 }
 
 // Page returns the current 1-indexed page number. Before any document
@@ -288,14 +456,14 @@ func (m Model) PageDimensions(n int) (w, h int, ok bool) {
 // operation. Hosts can surface this in their status bar.
 func (m Model) Err() error { return m.err }
 
-// KittySupported reports the terminal's Kitty graphics capability. The
-// probe runs once per session/process; expect KittyCapabilityUnknown for the
-// first few frames until the terminal responds (typically <50ms).
+// KittySupported reports the terminal's Kitty graphics capability from the
+// active TerminalSession. Expect KittyCapabilityUnknown for the first few
+// frames until the terminal responds (typically <50ms).
 func (m Model) KittySupported() picture.KittyCapability {
-	if m.cfg.PictureOptions.Session != nil {
-		return m.cfg.PictureOptions.Session.Snapshot().Kitty
+	if m.pic != nil {
+		return m.pic.KittySupported()
 	}
-	return picture.KittySupported()
+	return picture.KittyCapabilityUnknown
 }
 
 // HasRenderer reports whether an active Renderer is attached to the
@@ -309,6 +477,53 @@ func (m Model) HasRenderer() bool { return m.cur != nil }
 // unavailable. Cleared on SetPDF.
 func (m Model) RendererErr() error { return m.rendererErr }
 
+// Stop cancels pending picture preparation or transmission while preserving
+// the last committed View and terminal placement, and invalidates any in-flight
+// page rasterization. Unlike Keep or Dispose, Stop is not final.
+func (m *Model) Stop() tea.Cmd {
+	bump(m.renderGen)
+	if m.pic != nil {
+		return m.pic.Stop()
+	}
+	return nil
+}
+
+// Keep permanently stops picture work while preserving the last presented View
+// and terminal image on the current screen, and closes any attached PDF
+// renderer and owned session. When switching Bubble Tea's View().AltScreen from
+// true to false on exit, use KeepOnMainScreen instead.
+func (m *Model) Keep() tea.Cmd {
+	m.clearCache()
+	var cmd tea.Cmd
+	if m.pic != nil {
+		cmd = m.pic.Keep()
+	}
+	m.sourceImagePresented = false
+	if m.cur != nil {
+		_ = m.cur.Close()
+		m.cur = nil
+	}
+	return cmd
+}
+
+// KeepOnMainScreen permanently stops picture work like Keep, but always
+// retransmits and recreates the retained Kitty placement directly so it
+// survives a terminal screen switch from the alternate screen (ESC[?1049l) to
+// the main screen, and closes any attached PDF renderer and owned session.
+func (m *Model) KeepOnMainScreen() tea.Cmd {
+	m.clearCache()
+	var cmd tea.Cmd
+	if m.pic != nil {
+		cmd = m.pic.KeepOnMainScreen()
+	}
+	m.sourceImagePresented = false
+	if m.cur != nil {
+		_ = m.cur.Close()
+		m.cur = nil
+	}
+	return cmd
+}
+
 // Dispose cancels pending picture work, releases shared-memory buffers, closes
 // any attached PDF renderer, and returns the terminal placement cleanup Cmd
 // from ntpicture.Picture. Run the returned command when removing the widget or
@@ -318,11 +533,8 @@ func (m *Model) Dispose() tea.Cmd {
 	var cmd tea.Cmd
 	if m.pic != nil {
 		cmd = m.pic.Close()
-		if m.picClosed != nil {
-			*m.picClosed = true
-		}
 	}
-	m.presentedImage = nil
+	m.sourceImagePresented = false
 	if m.cur != nil {
 		_ = m.cur.Close()
 		m.cur = nil
@@ -337,11 +549,8 @@ func (m *Model) Close() error {
 	m.clearCache()
 	if m.pic != nil {
 		_ = m.pic.Close()
-		if m.picClosed != nil {
-			*m.picClosed = true
-		}
 	}
-	m.presentedImage = nil
+	m.sourceImagePresented = false
 	if m.cur == nil {
 		return nil
 	}
@@ -399,6 +608,7 @@ func (m *Model) SetPDFData(name string, data []byte) tea.Cmd {
 	m.docPages = nil
 	m.sourceImage = nil
 	m.sourceImmutable = false
+	m.sourceImagePresented = false
 	m.rendererErr = nil
 	m.zoom, m.panX, m.panY = 0, 0, 0
 	m.err = nil
@@ -438,6 +648,7 @@ func (m *Model) SetPDF(path string) tea.Cmd {
 	m.docPages = nil
 	m.sourceImage = nil
 	m.sourceImmutable = false
+	m.sourceImagePresented = false
 	m.rendererErr = nil
 	// Reset viewport on document change. Per-page viewport persistence is
 	// useful for flipping through a book at fixed zoom; switching docs
@@ -471,6 +682,7 @@ func (m *Model) SetPage(n int) tea.Cmd {
 	m.page = n
 	m.sourceImage = nil
 	m.sourceImmutable = false
+	m.sourceImagePresented = false
 	if m.mode == ImageMode {
 		return m.renderPageCmd(n)
 	}
@@ -492,9 +704,13 @@ func (m *Model) ToggleMode() tea.Cmd {
 		if m.path != "" && m.page > 0 {
 			return m.renderPageCmd(m.page)
 		}
+		if m.sourceImage != nil {
+			return m.applyViewport()
+		}
 		return nil
 	}
 	m.mode = TextMode
+	m.sourceImagePresented = false
 	// Drop any on-screen Kitty placement.
 	return m.presentImage(nil, true)
 }
@@ -503,13 +719,7 @@ func (m *Model) ToggleMode() tea.Cmd {
 // Entering Kitty mode is a no-op until Kitty support is confirmed.
 func (m *Model) ToggleRenderMode() tea.Cmd {
 	m.ensurePicture()
-	if m.pic.Mode() == picture.PictureGlyph {
-		if m.KittySupported() != picture.KittyCapabilitySupported {
-			return nil
-		}
-		return m.pic.SetMode(picture.PictureKitty)
-	}
-	return m.pic.SetMode(picture.PictureGlyph)
+	return m.pic.ToggleMode()
 }
 
 // Reload re-rasterizes the current page in ImageMode (no-op in TextMode).
@@ -530,6 +740,7 @@ func (m *Model) SetPageImage(page int, img image.Image) tea.Cmd {
 	}
 	m.sourceImage = img
 	m.sourceImmutable = false
+	m.sourceImagePresented = false
 	// Guard the docPages write: SetPageImage may be called before
 	// SetPDF, in which case docPages is nil and indexing panics.
 	if page <= len(m.docPages) && img != nil {
@@ -580,12 +791,7 @@ func (m *Model) PanDown() tea.Cmd  { return m.pan(0, +1) }
 
 // Fit returns the current FitMode (how the image is mapped onto the cell
 // rectangle when rendered by picture.Picture).
-func (m Model) Fit() FitMode {
-	if m.pic != nil {
-		return m.pic.Fit()
-	}
-	return m.fit
-}
+func (m Model) Fit() FitMode { return m.pic.Fit() }
 
 // CycleFit advances the FitMode through Contain → Fill → Cover → Contain.
 func (m *Model) CycleFit() tea.Cmd {
@@ -604,27 +810,16 @@ func (m *Model) CycleFit() tea.Cmd {
 // SetFit updates the FitMode on the underlying picture.Picture.
 func (m *Model) SetFit(fit FitMode) tea.Cmd {
 	m.ensurePicture()
-	cmd := m.pic.SetFit(fit)
-	m.fit = m.pic.Fit()
-	m.cfg.PictureConfig.Fit = m.fit
-	return cmd
+	return m.pic.SetFit(fit)
 }
 
 // Anchor returns the current FitAnchor.
-func (m Model) Anchor() FitAnchor {
-	if m.pic != nil {
-		return m.pic.Anchor()
-	}
-	return m.anchor
-}
+func (m Model) Anchor() FitAnchor { return m.pic.Anchor() }
 
 // SetAnchor updates the FitAnchor on the underlying picture.Picture.
 func (m *Model) SetAnchor(anchor FitAnchor) tea.Cmd {
 	m.ensurePicture()
-	cmd := m.pic.SetAnchor(anchor)
-	m.anchor = m.pic.Anchor()
-	m.cfg.PictureConfig.Anchor = m.anchor
-	return cmd
+	return m.pic.SetAnchor(anchor)
 }
 
 // ResetView snaps zoom to 0 and pan to the page origin (i.e. fit-to-rect
@@ -737,7 +932,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		if m.mode == ImageMode && m.cur != nil {
 			cmds = append(cmds, m.renderPageCmd(m.page))
-		} else if m.presentedImage != nil {
+		} else {
+			m.sourceImagePresented = false
 			if c := m.presentImage(nil, true); c != nil {
 				cmds = append(cmds, c)
 			}
@@ -754,6 +950,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.sourceImage = msg.img
 		m.sourceImmutable = true
+		m.sourceImagePresented = false
 		m.addToCache(msg.page, msg.dpi, msg.img)
 		b := msg.img.Bounds()
 		m.docPages[msg.page-1].width = b.Dx()
@@ -772,8 +969,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	// Forward every message to the picture controller so it can react to
 	// prepared frames, placement retirements, and terminal notifications.
 	if m.pic != nil {
+		prevCW, prevCH := m.pic.CellPixelSize()
 		if c := m.pic.Update(msg); c != nil {
 			cmds = append(cmds, c)
+		}
+		if m.cfg.DynamicDPI && m.mode == ImageMode && m.path != "" && m.page > 0 {
+			if cw, ch := m.pic.CellPixelSize(); cw != prevCW || ch != prevCH {
+				cmds = append(cmds, m.renderPageCmd(m.page))
+			}
 		}
 	}
 
@@ -880,7 +1083,7 @@ func (m Model) View() tea.View {
 		return tea.NewView(m.placeholderView(m.style.Status,
 			fmt.Sprintf("Loading %s…", SanitizeForTerminal(m.path))))
 	}
-	if m.mode == ImageMode && m.sourceImage != nil {
+	if m.mode == ImageMode && (m.sourceImage != nil || (m.cur != nil && m.pic != nil && m.pic.View() != "")) {
 		// picture.View()'s content is only as tall as the rendered image
 		// needs — Kitty mode emits the placement grid and FitContain
 		// can letterbox without padding the vertical axis. Pinning the

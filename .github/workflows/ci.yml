@@ -19,22 +19,29 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
+            examples/go.sum
             wasm.work.sum
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          go -C examples vet ./...
       - name: Test
-        run: go test ./...
+        run: |
+          go test ./...
+          go -C examples test ./...
       - name: Build library and examples
-        run: go build ./...
+        run: |
+          go build ./...
+          go -C examples build ./...
       - name: Build WASM site
         run: |
           mkdir -p web/demos
-          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go build -o web/demos/pdfview.wasm ./examples/pdfview
-          go tool booba-assets --no-index web
-          go tool booba-shim-assets web/ --shim=pdfium
+          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go -C examples build -o ../web/demos/pdfview.wasm ./pdfview
+          go -C examples tool booba-assets --no-index ../web
+          go -C examples tool booba-shim-assets ../web/ --shim=pdfium
           cp LICENSE.txt web/LICENSE
       - name: Check WASM site and smoke-test demo
         run: |

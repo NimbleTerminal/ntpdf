@@ -11,6 +11,7 @@ package ntpdf
 import (
 	"image"
 	"image/draw"
+	"math"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -40,7 +41,14 @@ type subImager interface {
 // viewportSize returns the normalized [0, 1] side length of the current
 // visible rectangle in source-image coords.
 func (m Model) viewportSize() float64 {
-	return 1.0 / float64(uint(1)<<uint(m.zoom))
+	z := m.zoom
+	if z < 0 {
+		z = 0
+	}
+	if z > 30 {
+		z = 30
+	}
+	return 1.0 / float64(uint(1)<<uint(z))
 }
 
 // viewportCenter returns the current viewport's center in normalized
@@ -64,6 +72,12 @@ func (m *Model) recenterTo(cx, cy float64) {
 // clampPan keeps the viewport rectangle inside [0, 1] × [0, 1]. Called
 // after every mutation of zoom or pan.
 func (m *Model) clampPan() {
+	if math.IsNaN(m.panX) || math.IsInf(m.panX, 0) {
+		m.panX = 0
+	}
+	if math.IsNaN(m.panY) || math.IsInf(m.panY, 0) {
+		m.panY = 0
+	}
 	vp := m.viewportSize()
 	if m.panX < 0 {
 		m.panX = 0
@@ -97,28 +111,37 @@ func (m *Model) pan(dx, dy float64) tea.Cmd {
 	return m.applyViewport()
 }
 
-// applyViewport crops the source image to the current viewport and
-// hands the result to the embedded picture.Picture for rendering.
+// applyViewport configures the source-pixel crop rectangle on the
+// embedded picture.Picture and submits the source image when needed.
 func (m *Model) applyViewport() tea.Cmd {
+	m.ensurePicture()
 	if m.sourceImage == nil {
-		return m.presentImage(nil, true)
+		m.sourceImagePresented = false
+		return m.presentImageCropped(nil, image.Rectangle{}, true)
 	}
-	view := cropToViewport(m.sourceImage, m.zoom, m.panX, m.panY)
-	return m.presentImage(view, m.sourceImmutable && m.zoom == 0)
+	crop := viewportCropRect(m.sourceImage, m.zoom, m.panX, m.panY)
+	if !m.sourceImagePresented {
+		m.sourceImagePresented = true
+		return m.presentImageCropped(m.sourceImage, crop, m.sourceImmutable)
+	}
+	return m.pic.SetCrop(crop)
 }
 
-// cropToViewport returns the sub-image described by (zoom, panX, panY)
-// in normalized source-image coords. At zoom 0 it returns src unchanged.
-//
-// Concrete image types from the image/ package satisfy subImager and
-// return a no-copy view that shares the source's pixel buffer. For other
-// image types (rare — a host-supplied image.Image via SetPageImage that
-// isn't a recognized standard library type) the fall-through copies the
-// pixels into a fresh *image.RGBA so the consumer always sees the
-// expected coordinate system.
-func cropToViewport(src image.Image, zoom int, panX, panY float64) image.Image {
+// viewportCropRect returns the source-pixel rectangle described by
+// (zoom, panX, panY) in normalized source-image coords. At zoom 0 it
+// returns an empty rectangle (full source image).
+func viewportCropRect(src image.Image, zoom int, panX, panY float64) image.Rectangle {
 	if src == nil || zoom <= 0 {
-		return src
+		return image.Rectangle{}
+	}
+	if zoom > 30 {
+		zoom = 30
+	}
+	if math.IsNaN(panX) || math.IsInf(panX, 0) {
+		panX = 0
+	}
+	if math.IsNaN(panY) || math.IsInf(panY, 0) {
+		panY = 0
 	}
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -145,11 +168,20 @@ func cropToViewport(src image.Image, zoom int, panX, panY float64) image.Image {
 	if y0 < b.Min.Y {
 		y0 = b.Min.Y
 	}
-	cropRect := image.Rect(x0, y0, x0+rectW, y0+rectH)
+	return image.Rect(x0, y0, x0+rectW, y0+rectH)
+}
+
+// cropToViewport returns the sub-image described by (zoom, panX, panY)
+// in normalized source-image coords. At zoom 0 it returns src unchanged.
+func cropToViewport(src image.Image, zoom int, panX, panY float64) image.Image {
+	cropRect := viewportCropRect(src, zoom, panX, panY)
+	if cropRect.Empty() {
+		return src
+	}
 	if si, ok := src.(subImager); ok {
 		return si.SubImage(cropRect)
 	}
-	out := image.NewRGBA(image.Rect(0, 0, rectW, rectH))
+	out := image.NewRGBA(image.Rect(0, 0, cropRect.Dx(), cropRect.Dy()))
 	draw.Draw(out, out.Bounds(), src, cropRect.Min, draw.Src)
 	return out
 }

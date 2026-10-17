@@ -17,13 +17,14 @@ const (
 )
 
 // RenderMode is the underlying picture protocol for ImageMode. Aliased so
-// callers can reach picture's constants (RenderGlyph, RenderKitty) without
-// importing ntpicture directly.
+// callers can reach picture's constants (RenderGlyph, RenderKitty, RenderAuto)
+// without importing ntpicture directly.
 type RenderMode = picture.PictureMode
 
 const (
-	RenderGlyph = picture.PictureGlyph
-	RenderKitty = picture.PictureKitty
+	RenderGlyph = picture.PictureGlyph // universal half-block ANSI
+	RenderKitty = picture.PictureKitty // high-resolution Kitty graphics
+	RenderAuto  = picture.PictureAuto  // automatic Kitty/Glyph selection from terminal capability
 )
 
 // FitMode controls how the page image is mapped onto the cell rectangle.
@@ -48,6 +49,10 @@ const (
 	AnchorLeft   = picture.AnchorLeft
 	AnchorRight  = picture.AnchorRight
 )
+
+// Viewport selects a cell rectangle within the widget's full SetSize
+// dimensions. Re-exported from ntpicture.
+type Viewport = picture.Viewport
 
 // DefaultRenderDPI is the resolution passed to Renderer.RenderPage when
 // Config.RenderDPI is unset. 300 DPI matches the new harness's target
@@ -231,8 +236,9 @@ type Config struct {
 	// widget cell size (Cols/Rows) and the page point dimensions.
 	DynamicDPI bool
 
-	// CellPixelWidth and CellPixelHeight specify the pixel dimensions of a
-	// single terminal cell, used only when DynamicDPI is true. If zero,
+	// CellPixelWidth and CellPixelHeight specify the initial pixel
+	// dimensions of a single terminal cell, used to seed PictureConfig /
+	// the owned TerminalSession and DynamicDPI calculations. If zero,
 	// defaults to 8x16 pixels per cell.
 	CellPixelWidth  int
 	CellPixelHeight int

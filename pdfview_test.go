@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/ledongthuc/pdf"
+	picture "nimbleterminal.dev/ntpicture"
 )
 
 // driveCmd recursively executes a Bubble Tea command tree against m.Update.
@@ -966,4 +967,170 @@ func TestModelTextViewAndPagePointSize(t *testing.T) {
 	if m.Mode() != ImageMode {
 		t.Fatalf("TextView mutated active Mode to %v, want ImageMode", m.Mode())
 	}
+}
+
+func TestNewWithConfig_PictureOptionsRender(t *testing.T) {
+	var cfg Config
+	cfg.PictureOptions.Render.Fit = FitFill
+	cfg.PictureOptions.Render.Anchor = AnchorBottom
+	m := NewWithConfig(cfg)
+	defer m.Close()
+	if m.Fit() != FitFill {
+		t.Fatalf("expected FitFill from PictureOptions.Render, got %v", m.Fit())
+	}
+	if m.Anchor() != AnchorBottom {
+		t.Fatalf("expected AnchorBottom from PictureOptions.Render, got %v", m.Anchor())
+	}
+}
+
+func TestModelSessionKeepSetBackgroundSetVisible(t *testing.T) {
+	fake := &fakeRenderer{}
+	m := NewWithConfig(Config{Cols: 10, Rows: 4, DefaultMode: ImageMode})
+	if m.Session() == nil {
+		t.Fatal("expected non-nil owned TerminalSession")
+	}
+	gen := bump(m.loadGen)
+	m, _ = m.Update(pdfLoadedMsg{
+		path:     "test.pdf",
+		pages:    make([]pdfPage, 1),
+		renderer: fake,
+		gen:      gen,
+	})
+	m = driveCmd(m, m.SetPageImage(1, image.NewNRGBA(image.Rect(0, 0, 4, 4))))
+	m = driveCmd(m, m.SetBackground(color.RGBA{R: 16, G: 24, B: 32, A: 255}))
+	m = driveCmd(m, m.SetVisible(false))
+	m = driveCmd(m, m.SetVisible(true))
+	_ = m.Keep()
+	if fake.closes != 1 {
+		t.Fatalf("after Keep fakeRenderer.closes = %d, want 1", fake.closes)
+	}
+	if m.HasRenderer() {
+		t.Fatal("HasRenderer() = true after Keep, want false")
+	}
+}
+
+func TestKittyCapabilityOverrideAndToggle(t *testing.T) {
+	m := NewWithConfig(Config{Cols: 10, Rows: 4, DefaultMode: ImageMode})
+	defer m.Close()
+	m, _ = m.Update(picture.KittyCapabilityMsg{Capability: picture.KittyCapabilitySupported})
+	if got := m.KittySupported(); got != picture.KittyCapabilitySupported {
+		t.Fatalf("KittySupported() = %v, want KittyCapabilitySupported", got)
+	}
+	_ = m.ToggleRenderMode()
+	if got := m.RenderMode(); got != RenderKitty {
+		t.Fatalf("RenderMode() after ToggleRenderMode = %v, want RenderKitty", got)
+	}
+	_ = m.ToggleRenderMode()
+	if got := m.RenderMode(); got != RenderGlyph {
+		t.Fatalf("RenderMode() after second ToggleRenderMode = %v, want RenderGlyph", got)
+	}
+
+	// Also verify SetTerminal(true, cw, ch) round-trips ToggleRenderMode Kitty -> Glyph -> Kitty.
+	m2 := NewWithConfig(Config{Cols: 10, Rows: 4, DefaultMode: ImageMode})
+	defer m2.Close()
+	_ = m2.SetTerminal(true, 10, 20)
+	if got := m2.RenderMode(); got != RenderKitty {
+		t.Fatalf("RenderMode() after SetTerminal(true) = %v, want RenderKitty", got)
+	}
+	_ = m2.ToggleRenderMode()
+	if got := m2.RenderMode(); got != RenderGlyph {
+		t.Fatalf("RenderMode() after first ToggleRenderMode = %v, want RenderGlyph", got)
+	}
+	_ = m2.ToggleRenderMode()
+	if got := m2.RenderMode(); got != RenderKitty {
+		t.Fatalf("RenderMode() after second ToggleRenderMode = %v, want RenderKitty", got)
+	}
+}
+
+func TestAutoRenderModeAndPictureAccessors(t *testing.T) {
+	var cfg Config
+	cfg.Cols, cfg.Rows = 12, 6
+	cfg.DefaultMode = ImageMode
+	cfg.PictureOptions.AutoMode = true
+	m := NewWithConfig(cfg)
+	defer m.Close()
+
+	if !m.AutoRenderMode() {
+		t.Fatal("expected AutoRenderMode() = true")
+	}
+	if cols, rows := m.Size(); cols != 12 || rows != 6 {
+		t.Fatalf("Size() = (%d, %d), want (12, 6)", cols, rows)
+	}
+	if !m.Visible() {
+		t.Fatal("expected Visible() = true")
+	}
+
+	m = driveCmd(m, m.SetKittyCapability(picture.KittyCapabilitySupported))
+	if got := m.RenderMode(); got != RenderKitty {
+		t.Fatalf("RenderMode() with AutoMode and supported Kitty = %v, want RenderKitty", got)
+	}
+	if st := m.TerminalState(); st.Kitty != picture.KittyCapabilitySupported {
+		t.Fatalf("TerminalState().Kitty = %v, want KittyCapabilitySupported", st.Kitty)
+	}
+
+	m = driveCmd(m, m.SetCellSize(10, 20))
+	if cw, ch := m.CellPixelSize(); cw != 10 || ch != 20 {
+		t.Fatalf("CellPixelSize() = (%d, %d), want (10, 20)", cw, ch)
+	}
+	if !m.AutoRenderMode() {
+		t.Fatal("SetCellSize should preserve AutoRenderMode")
+	}
+
+	m = driveCmd(m, m.SetResolution(0.5))
+	if got := m.Resolution(); got != 0.5 {
+		t.Fatalf("Resolution() = %v, want 0.5", got)
+	}
+	m = driveCmd(m, m.SetMaxRasterPixels(4096))
+	if got := m.MaxRasterPixels(); got != 4096 {
+		t.Fatalf("MaxRasterPixels() = %d, want 4096", got)
+	}
+	bg := color.RGBA{R: 10, G: 20, B: 30, A: 255}
+	m = driveCmd(m, m.SetBackground(bg))
+	if m.Background() == nil {
+		t.Fatal("expected non-nil Background()")
+	}
+
+	// Verify ZoomIn / PanRight / ResetView drive picture.Picture's native Crop.
+	m = driveCmd(m, m.SetPageImage(1, image.NewNRGBA(image.Rect(0, 0, 100, 100))))
+	if !m.Crop().Empty() {
+		t.Fatalf("Crop() at zoom 0 = %v, want empty", m.Crop())
+	}
+	m = driveCmd(m, m.ZoomIn())
+	if got := m.Crop(); got != image.Rect(25, 25, 75, 75) {
+		t.Fatalf("Crop() after ZoomIn = %v, want (25,25)-(75,75)", got)
+	}
+	m = driveCmd(m, m.PanRight())
+	if got := m.Crop(); got != image.Rect(38, 25, 88, 75) {
+		t.Fatalf("Crop() after PanRight = %v, want (38,25)-(88,75)", got)
+	}
+	m = driveCmd(m, m.ResetView())
+	if !m.Crop().Empty() {
+		t.Fatalf("Crop() after ResetView = %v, want empty", m.Crop())
+	}
+
+	// Explicit ToggleRenderMode disables AutoRenderMode; SetRenderMode(RenderAuto) re-enables it.
+	_ = m.ToggleRenderMode()
+	if m.AutoRenderMode() {
+		t.Fatal("expected AutoRenderMode() = false after ToggleRenderMode")
+	}
+	_ = m.SetRenderMode(RenderAuto)
+	if !m.AutoRenderMode() {
+		t.Fatal("expected AutoRenderMode() = true after SetRenderMode(RenderAuto)")
+	}
+
+	// Verify Viewport / SetViewport / ResetViewport and Stop / KeepOnMainScreen.
+	if _, ok := m.Viewport(); ok {
+		t.Fatal("expected initial Viewport() ok = false")
+	}
+	wantVP := Viewport{X: 1, Y: 2, Width: 6, Height: 3}
+	m.SetViewport(wantVP)
+	if gotVP, ok := m.Viewport(); !ok || gotVP != wantVP {
+		t.Fatalf("Viewport() = (%+v, %v), want (%+v, true)", gotVP, ok, wantVP)
+	}
+	m.ResetViewport()
+	if _, ok := m.Viewport(); ok {
+		t.Fatal("expected Viewport() ok = false after ResetViewport")
+	}
+	_ = m.Stop()
+	_ = m.KeepOnMainScreen()
 }

@@ -15,15 +15,22 @@ func TestBrowserSharedMemoryLifecycle(t *testing.T) {
 	registry := js.Global().Get("Map").New()
 	js.Global().Set("ghosttyKittySharedMemory", registry)
 	t.Cleanup(func() { js.Global().Set("ghosttyKittySharedMemory", old) })
-	picture.ForceKittyCapability(picture.KittyCapabilitySupported)
-	t.Cleanup(func() { picture.ForceKittyCapability(picture.KittyCapabilityUnknown) })
+	t.Setenv("NTPICTURE_KITTY", "1")
 
-	m := NewWithConfig(Config{Cols: 2, Rows: 2, DefaultMode: ImageMode, PictureConfig: picture.Config{
-		KittyMedium: picture.KittyMediumSharedMemory,
-	}})
+	m := NewWithConfig(Config{
+		Cols:        2,
+		Rows:        2,
+		DefaultMode: ImageMode,
+		PictureConfig: picture.Config{
+			KittyMedium: picture.KittyMediumSharedMemory,
+		},
+	})
 	defer m.Close()
 	m = driveCmd(m, m.ToggleRenderMode())
 	m = driveCmd(m, m.SetPageImage(1, image.NewNRGBA(image.Rect(0, 0, 2, 2))))
+	if m.RenderMode() != RenderKitty {
+		t.Fatalf("expected RenderKitty, got %v", m.RenderMode())
+	}
 	if st := m.PictureStatus(); st.Medium != picture.KittyMediumSharedMemory || st.Format != picture.KittyFormatRGBA {
 		t.Fatalf("expected shared-memory RGBA, got medium=%v format=%v", st.Medium, st.Format)
 	}
@@ -39,8 +46,10 @@ func TestBrowserSharedMemoryLifecycle(t *testing.T) {
 
 	// Older browser terminals must still render through direct PNG.
 	js.Global().Set("ghosttyKittySharedMemory", js.Undefined())
-	m = driveCmd(m, m.ToggleRenderMode())
 	m = driveCmd(m, m.SetPageImage(1, image.NewNRGBA(image.Rect(0, 0, 2, 2))))
+	if m.RenderMode() != RenderKitty {
+		t.Fatalf("expected RenderKitty after Close/recreate, got %v", m.RenderMode())
+	}
 	if st := m.PictureStatus(); st.Medium != picture.KittyMediumDirect || st.Format != picture.KittyFormatPNG {
 		t.Fatalf("expected direct PNG fallback, got medium=%v format=%v", st.Medium, st.Format)
 	}
