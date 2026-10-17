@@ -8,6 +8,7 @@
 - Add `TextView`, `PagePointSize`, and `PageImageCount` helpers on `Model`.
 - Add `gallery`, `report`, and `inspector` demos alongside `pdfview` and `pagedims`, with a multi-demo browser site powered by `go-booba` v0.9.2 and `booba-shim` v0.5.0.
 - Move the browser Bubble Tea `replace` directive into `wasm.work` and isolate demo dependencies in `examples/go.mod`.
+- Upgrade `go-pdfium` to v1.21.3 and `charm.land/bubbletea/v2` to v2.1.0.
 
 ## v0.3.1 (2026-09-29)
 

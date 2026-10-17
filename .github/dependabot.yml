@@ -14,3 +14,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /examples
+    schedule:
+      interval: weekly
+    ignore:
+      # Examples intentionally use the library from this checkout.
+      - dependency-name: nimbleterminal.dev/ntpdf

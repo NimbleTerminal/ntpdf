@@ -23,7 +23,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jolestar/go-commons-pool/v2 v2.1.2 // indirect
-	github.com/klippa-app/go-pdfium v1.21.0 // indirect
+	github.com/klippa-app/go-pdfium v1.21.3 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
