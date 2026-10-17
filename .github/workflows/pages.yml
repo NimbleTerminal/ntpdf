@@ -35,20 +35,24 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
-      - name: Build WASM demo
+      - name: Build WASM demos
         run: |
           mkdir -p web/demos
-          GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go -C examples build -o ../web/demos/pdfview.wasm ./pdfview
+          for demo in gallery report inspector pagedims pdfview; do
+            GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go -C examples build -o "../web/demos/${demo}.wasm" "./${demo}"
+          done
       - name: Set up web assets
         run: |
           go -C examples tool booba-assets --no-index ../web
           go -C examples tool booba-shim-assets ../web/ --shim=pdfium
           cp LICENSE.txt web/LICENSE
-      - name: Check site and smoke-test WASM demo
+      - name: Check site and smoke-test WASM demos
         run: |
           node --check web/site.js
           node scripts/check-site.mjs
-          node scripts/smoke-demo.mjs pdfview
+          for demo in gallery report inspector pagedims pdfview; do
+            node scripts/smoke-demo.mjs "${demo}"
+          done
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
