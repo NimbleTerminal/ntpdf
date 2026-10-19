@@ -12,7 +12,6 @@ require (
 )
 
 require (
-	github.com/NimbleMarkets/booba-shim v0.5.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20261008173134-6b8d4baf91b4 // indirect
 	github.com/charmbracelet/x/ansi v0.11.9 // indirect
@@ -36,11 +35,12 @@ require (
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
+	nimbleterminal.dev/ntshim v0.6.0 // indirect
 )
 
 replace nimbleterminal.dev/ntpdf => ..
 
 tool (
-	github.com/NimbleMarkets/booba-shim/cmd/booba-shim-assets
 	github.com/NimbleMarkets/go-booba/cmd/booba-assets
+	nimbleterminal.dev/ntshim/cmd/ntshim-assets
 )

@@ -135,7 +135,7 @@ tasks:
     cmds:
       - task: build-wasm
       - go -C examples tool booba-assets --no-index ../web
-      - go -C examples tool booba-shim-assets ../web/ --shim=pdfium
+      - go -C examples tool ntshim-assets ../web/ --shim=pdfium
       - cp LICENSE.txt web/LICENSE
       - task: check-site
 
@@ -156,7 +156,7 @@ tasks:
   clean-wasm-site:
     desc: 'Remove generated WASM demo site artifacts'
     cmds:
-      - rm -rf web/demos web/booba web/ghostty-web web/booba-shim
+      - rm -rf web/demos web/booba web/ghostty-web web/ntshim
       - rm -f web/wasm_exec.js web/app.wasm web/LICENSE
 
 ###############################################################################

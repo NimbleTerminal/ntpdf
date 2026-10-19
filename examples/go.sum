@@ -6,8 +6,6 @@ charm.land/lipgloss/v2 v2.0.6 h1:EaGKeuA8FvF+v2BT5VmZd2LoYLaMZJXA5n34th8nCIQ=
 charm.land/lipgloss/v2 v2.0.6/go.mod h1:ipDDJNSGa1hlwDtSfW1s2/xR8Vdhbut4PXh2zEKZd0Q=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
-github.com/NimbleMarkets/booba-shim v0.5.0 h1:LH/9GbMb/iMmhoqPp5OtY/ok/6jcovoDQp5FDo++GFM=
-github.com/NimbleMarkets/booba-shim v0.5.0/go.mod h1:+3ch4kZuCLtrwGK2s3ALo/I1Dzcz4e888PC3f2lLbgs=
 github.com/NimbleMarkets/go-booba v0.9.2 h1:SS6cfOCeWj3eMZhspkn3l9nHYTnofP80rGtCDAWoWEc=
 github.com/NimbleMarkets/go-booba v0.9.2/go.mod h1:i/XjhpdZ8B+gXeaYLQ1HQLw0QOh9Cg/t2I2lNKDSynw=
 github.com/aymanbagabas/go-udiff v0.4.1 h1:OEIrQ8maEeDBXQDoGCbbTTXYJMYRCRO1fnodZ12Gv5o=
@@ -93,3 +91,5 @@ gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 nimbleterminal.dev/ntpicture v0.1.0 h1:CsE+wzMxdG81vxkm31viZ/RiT4pafVajoOoX1DG9BnQ=
 nimbleterminal.dev/ntpicture v0.1.0/go.mod h1:87798EJw9zvJoD1sdT6wzbGBpY+Vwco9U4NVf5Cv0tw=
+nimbleterminal.dev/ntshim v0.6.0 h1:0m7g3laU1cxwVZLz+yY/c2acHuyQKrd3Bi9cvVS6w3c=
+nimbleterminal.dev/ntshim v0.6.0/go.mod h1:df+RVCGgRjaMTM+IfmTHHe4Fd6yy1njO97P3vYc8yxE=

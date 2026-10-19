@@ -1,6 +1,6 @@
 // jsrenderer_js.go: browser-WASM Renderer backed by
-// booba-shim/pdfium (the @embedpdf/pdfium JS bridge installed by
-// `go tool booba-shim-assets --shim=pdfium`).
+// ntshim/pdfium (the @embedpdf/pdfium JS bridge installed by
+// `go tool ntshim-assets --shim=pdfium`).
 //
 // Conforms to the same ntpdf.Renderer contract as the native
 // pdfium-via-wazero implementation. Mutex serialization, idempotent
@@ -17,7 +17,7 @@ import (
 	"image"
 	"math"
 
-	"github.com/NimbleMarkets/booba-shim/pdfium"
+	"nimbleterminal.dev/ntshim/pdfium"
 )
 
 // jsRenderer adapts a pdfium.Document to the Renderer interface.
@@ -27,7 +27,7 @@ type jsRenderer struct {
 }
 
 // DefaultRendererFactory returns a RendererFactory that delegates to
-// the booba-shim/pdfium bridge. The first factory call (per process)
+// the ntshim/pdfium bridge. The first factory call (per process)
 // initialises the JS bridge; subsequent calls just open new documents
 // against the already-loaded PDFium runtime.
 //
@@ -50,7 +50,7 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 		}
 		doc, err := pdfium.Load(context.Background(), data)
 		if err != nil {
-			return nil, fmt.Errorf("booba-shim/pdfium load %q: %w", name, err)
+			return nil, fmt.Errorf("ntshim/pdfium load %q: %w", name, err)
 		}
 		return &jsRenderer{doc: doc, maxRenderPixels: limits.MaxRenderPixels}, nil
 	}

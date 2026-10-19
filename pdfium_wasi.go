@@ -7,7 +7,7 @@
 // rasterizer API).
 //
 // The browser path (GOOS=js GOARCH=wasm) is handled separately in
-// jsrenderer_js.go, a thin adapter over the booba-shim/pdfium package
+// jsrenderer_js.go, a thin adapter over the ntshim/pdfium package
 // which bridges to the host page's @embedpdf/pdfium instance via
 // syscall/js.
 

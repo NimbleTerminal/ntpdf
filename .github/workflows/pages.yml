@@ -44,7 +44,7 @@ jobs:
       - name: Set up web assets
         run: |
           go -C examples tool booba-assets --no-index ../web
-          go -C examples tool booba-shim-assets ../web/ --shim=pdfium
+          go -C examples tool ntshim-assets ../web/ --shim=pdfium
           cp LICENSE.txt web/LICENSE
       - name: Check site and smoke-test WASM demos
         run: |

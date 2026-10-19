@@ -1,5 +1,5 @@
 import { BoobaTerminal, installActionBar, installRendererHud, parseRendererFromURL } from './booba/booba.js';
-import './booba-shim/pdfium/pdfium-shim.js';
+import './ntshim/pdfium/pdfium-shim.js';
 
 const demos = {
   gallery: 'Document gallery',
@@ -35,7 +35,7 @@ function failed(error) {
 async function main() {
   status.textContent = 'Initializing PDFium renderer…';
   try {
-    await window.boobaShim?.pdfium?.ready;
+    await window.ntshim?.pdfium?.ready;
   } catch (err) {
     console.warn('PDFium init failed (ImageMode will fall back to TextMode):', err);
   }

@@ -9,10 +9,10 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/NimbleMarkets/booba-shim v0.5.0
 	github.com/klippa-app/go-pdfium v1.21.3
 	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	nimbleterminal.dev/ntpicture v0.1.0
+	nimbleterminal.dev/ntshim v0.6.0
 )
 
 require (

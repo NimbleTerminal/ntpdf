@@ -7,7 +7,7 @@ const demos = ['gallery', 'report', 'inspector', 'pagedims', 'pdfview'];
 for (const file of [
   'index.html', 'site.css', 'site.js', 'wasm_exec.js', 'booba/booba.js',
   'ghostty-web/ghostty-web.js', 'ghostty-web/ghostty-vt.wasm',
-  'booba-shim/pdfium/pdfium-shim.js',
+  'ntshim/pdfium/pdfium-shim.js',
   'LICENSE',
 ]) await access(`web/${file}`);
 
@@ -18,7 +18,7 @@ for (const demo of demos) {
 }
 
 const siteJs = await readFile('web/site.js', 'utf8');
-assert.ok(siteJs.includes("import './booba-shim/pdfium/pdfium-shim.js';"), 'pdfium-shim side-effect import');
+assert.ok(siteJs.includes("import './ntshim/pdfium/pdfium-shim.js';"), 'pdfium-shim side-effect import');
 
 const html = await readFile('web/index.html', 'utf8');
 for (const [, path] of html.matchAll(/(?:src|href)="([^"?#]+)"/g)) {

@@ -14,7 +14,7 @@
 //   - native (CGO-free) → go-pdfium via wazero, with the embedded
 //     pdfium.wasm blob
 //   - GOOS=js GOARCH=wasm → bridges via syscall/js into the host page's
-//     booba-shim pdfium instance (see web/booba-shim/pdfium/pdfium-shim.js)
+//     ntshim pdfium instance (see web/ntshim/pdfium/pdfium-shim.js)
 //   - GOOS=wasip1 GOARCH=wasm → nil (wazero-in-WASI is unusably slow)
 //
 // Mirrors the wrapping idioms of the sibling ntsvg widget:

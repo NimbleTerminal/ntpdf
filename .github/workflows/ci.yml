@@ -43,7 +43,7 @@ jobs:
             GOWORK="$PWD/wasm.work" GOARCH=wasm GOOS=js CGO_ENABLED=0 go -C examples build -o "../web/demos/${demo}.wasm" "./${demo}"
           done
           go -C examples tool booba-assets --no-index ../web
-          go -C examples tool booba-shim-assets ../web/ --shim=pdfium
+          go -C examples tool ntshim-assets ../web/ --shim=pdfium
           cp LICENSE.txt web/LICENSE
       - name: Check WASM site and smoke-test demos
         run: |

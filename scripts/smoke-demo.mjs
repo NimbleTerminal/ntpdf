@@ -9,7 +9,7 @@ const demo = process.argv[2];
 assert.ok(['gallery', 'report', 'inspector', 'pagedims', 'pdfview'].includes(demo));
 
 vm.runInThisContext(await readFile('web/wasm_exec.js', 'utf8'));
-globalThis.boobaShim = {
+globalThis.ntshim = {
   pdfium: {
     ready: Promise.resolve(),
     loadDocument: async () => 1,
