@@ -4,7 +4,6 @@
 package ntpdf
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/ledongthuc/pdf"
+	"nimbleterminal.dev/ntpdf/pdfdoc"
 )
 
 // mediaBox is a page's coordinate rectangle in PDF points. Origin is the
@@ -129,23 +129,21 @@ func runLoadFromBytes(name string, data []byte, gen uint64, factory RendererFact
 	if len(data) == 0 {
 		return pdfErrMsg{err: errors.New("empty pdf data"), gen: gen}
 	}
-	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+	doc, err := pdfdoc.Open(data, pdfdoc.Limits{
+		MaxFileBytes:     limits.MaxFileBytes,
+		MaxPages:         limits.MaxPages,
+		MaxStreamBytes:   limits.MaxStreamBytes,
+		MaxInflatedBytes: limits.MaxInflatedBytes,
+		MaxImagePixels:   int64(limits.MaxRenderPixels),
+		MaxImageDraws:    limits.MaxImagesPerPage,
+	})
 	if err != nil {
 		return pdfErrMsg{err: fmt.Errorf("parse %q: %w", name, err), gen: gen}
 	}
-	n := r.NumPage()
-	if n <= 0 {
-		return pdfErrMsg{err: errors.New("pdf reports zero pages"), gen: gen}
-	}
-	if limits.MaxPages > 0 && n > limits.MaxPages {
-		return pdfErrMsg{
-			err: fmt.Errorf("pdf reports %d pages, exceeds MaxPages=%d", n, limits.MaxPages),
-			gen: gen,
-		}
-	}
+	n := doc.NumPages()
 	pages := make([]pdfPage, n)
 	for i := 1; i <= n; i++ {
-		pages[i-1] = extractPage(r.Page(i), limits)
+		pages[i-1] = extractPage(doc, i)
 	}
 
 	var renderer Renderer
@@ -162,75 +160,31 @@ func runLoadFromBytes(name string, data []byte, gen uint64, factory RendererFact
 	}
 }
 
-// extractPage pulls positioned text + image-count from a single page,
-// guarded by a recover so a malformed page can't crash the load Cmd.
-// On panic it returns a zero-valued pdfPage with just the default media
-// box, which renderTextPage handles cleanly as an empty page.
-func extractPage(page pdf.Page, limits Limits) (out pdfPage) {
-	out.media = defaultMediaBox()
-	if page.V.IsNull() {
+// extractPage pulls MediaBox, positioned text runs, and image count from a
+// single 1-indexed page via pdfdoc.Document. On per-page extraction failure it
+// returns a zero-valued pdfPage with the default US Letter MediaBox so a
+// single malformed page degrades to an empty placeholder rather than failing
+// the whole document load.
+func extractPage(doc *pdfdoc.Document, pageNum int) pdfPage {
+	out := pdfPage{media: defaultMediaBox()}
+	if doc == nil {
 		return out
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			// Reset to minimal-safe state. Don't propagate — the
-			// reviewer's DoS hardening explicitly asked for per-page
-			// failures to stay local.
-			out = pdfPage{media: defaultMediaBox()}
-		}
-	}()
-	out.media = pageMediaBox(page)
-	out.runs = page.Content().Text
-	out.imageCount = countPageImages(page, limits.MaxImagesPerPage)
+	if box, ok, err := doc.MediaBox(pageNum); err == nil && ok {
+		out.media = mediaBox{x0: box.X0, y0: box.Y0, x1: box.X1, y1: box.Y1}
+	}
+	runs, err := doc.PageTextRuns(pageNum)
+	if err != nil {
+		return pdfPage{media: defaultMediaBox()}
+	}
+	out.runs = runs
+	if imgs := doc.PageImages(pageNum); imgs > 0 {
+		out.imageCount = imgs
+	}
 	return out
 }
 
-// pageMediaBox walks the page-tree node chain looking for the first
-// MediaBox declaration, mirroring the PDF spec's inheritance rule (a
-// child page inherits MediaBox from its closest ancestor that declares
-// one). Falls back to US Letter dimensions when the document is silent —
-// chosen because it's the most common default and gives sane projections
-// for most real-world PDFs.
-func pageMediaBox(p pdf.Page) mediaBox {
-	for cur := p.V; !cur.IsNull(); cur = cur.Key("Parent") {
-		mb := cur.Key("MediaBox")
-		if mb.Kind() != pdf.Array || mb.Len() != 4 {
-			continue
-		}
-		return mediaBox{
-			x0: mb.Index(0).Float64(),
-			y0: mb.Index(1).Float64(),
-			x1: mb.Index(2).Float64(),
-			y1: mb.Index(3).Float64(),
-		}
-	}
-	return defaultMediaBox()
-}
-
 func defaultMediaBox() mediaBox { return mediaBox{0, 0, 612, 792} }
-
-// countPageImages walks /Resources/XObject and counts entries whose
-// Subtype is "Image". Returns 0 when the dictionary is absent — image
-// placeholders are a nice-to-have, never load-blocking. maxImages > 0
-// short-circuits the count once the cap is reached; a hostile dict
-// with millions of entries can't burn the load goroutine.
-func countPageImages(p pdf.Page, maxImages int) int {
-	xobj := p.Resources().Key("XObject")
-	if xobj.IsNull() {
-		return 0
-	}
-	count := 0
-	for _, k := range xobj.Keys() {
-		entry := xobj.Key(k)
-		if entry.Key("Subtype").Name() == "Image" {
-			count++
-			if maxImages > 0 && count >= maxImages {
-				return count
-			}
-		}
-	}
-	return count
-}
 
 // TextView renders the current page's spatial text projection and image
 // placeholders into a (cols × rows) cell rectangle without changing the

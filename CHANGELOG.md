@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+- Add `nimbleterminal.dev/ntpdf/pdfdoc`, a headless, resource-budgeted PDF reader with fail-closed stream, filter, predictor, object-stream, and cross-reference preflight checks, plus panic-guarded document metadata (`Version`, `Info`, `FormatDate`) and page queries (`MediaBox`, `PageSize`, `PageText`, `PageTextRuns`, `PageImages`).
+- Route `ntpdf` text-mode loading (`SetPDF`, `SetPDFData`, `InitialPath`, `InitialData`) through `ntpdf/pdfdoc` and add `MaxStreamBytes` and `MaxInflatedBytes` caps to `ntpdf.Limits`.
+- Migrate browser-WASM PDFium shim from `github.com/NimbleMarkets/booba-shim` to `nimbleterminal.dev/ntshim` v0.6.0.
+
 ## v0.4.0 (2026-10-17)
 
 - **Breaking:** Rename module from `github.com/NimbleMarkets/ntcharts-pdf` to `nimbleterminal.dev/ntpdf` (`package ntpdf` at the module root).

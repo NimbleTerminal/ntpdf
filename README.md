@@ -126,19 +126,27 @@ When the factory returns nil (or fails), ImageMode requests fall back to TextMod
 - `pv.HasRenderer() bool` — true when the configured factory actually opened a Renderer for the current document. False after a failed factory call (a hostile-doc rasterizer init failure, or no factory configured on WASM). Pair with the next.
 - `pv.RendererErr() error` — the most recent factory error, persisted across the document's lifetime (cleared on the next `SetPDF`). Surface it in your status bar to explain why ImageMode is unavailable.
 
-## Resource limits (`Config.Limits`)
+## Resource limits (`Config.Limits`) & Headless Reader (`ntpdf/pdfdoc`)
 
-PDFs are an untrusted-input format; hostile or malformed documents can claim billions of pages, demand 100 GB rasterizations, or panic the parser. `Config.Limits` exposes conservative caps applied automatically:
+PDFs are an untrusted-input format; hostile or malformed documents can claim billions of pages, hide objects or cross-reference tables inside strings, chain decompression bombs, demand 100 GB rasterizations, or panic the parser.
+
+Before `ntpdf` hands bytes to `github.com/ledongthuc/pdf` in `TextMode`, it validates and opens the document through [`nimbleterminal.dev/ntpdf/pdfdoc`](./pdfdoc) — a standalone, headless PDF reader package with no Bubble Tea dependency. `pdfdoc.Open(data, limits)` enforces a fail-closed lexical, cross-reference, and stream-inflation preflight before constructing a `Document`, and exposes per-document (`NumPages`, `Version`, `Info`) and per-page (`MediaBox`, `PageSize`, `PageText`, `PageTextRuns`, `PageImages`) queries with synchronous panic recovery.
+
+`Config.Limits` exposes conservative caps applied automatically:
 
 | Field | Default | What it caps |
 |---|---|---|
-| `MaxFileBytes` | 256 MiB | File size before the default renderer reads it (filesystem paths only) |
+| `MaxFileBytes` | 256 MiB | Input PDF byte length (filesystem `os.Stat` and in-memory byte slice) |
 | `MaxPages` | 10 000 | Refuses to load PDFs claiming more pages |
-| `MaxImagesPerPage` | 1024 | Caps placeholder enumeration per page |
+| `MaxStreamBytes` | 256 MiB | Maximum inflated size of any single PDF stream during preflight |
+| `MaxInflatedBytes` | 1 GiB | Maximum total inflated size across all PDF streams during preflight |
+| `MaxImagesPerPage` | 1024 | Caps image draw enumeration (`Do` XObjects, nested `Form` XObjects, inline `BI`) per page |
 | `MaxRenderDPI` | 600 | Per-call DPI clamp applied to every renderer (custom factories included) |
-| `MaxRenderPixels` | 100 000 000 | Default renderer queries page size and lowers DPI to fit the bitmap budget |
+| `MaxRenderPixels` | 100 000 000 | Default renderer queries page size and lowers DPI to fit the bitmap budget (also caps preflight image streams / predictors) |
 
 Set any field to `-1` to disable that cap for trusted input; zero uses the default. Per-page text extraction is panic-guarded — a malformed page yields an empty placeholder rather than crashing the load.
+
+> **Process isolation for untrusted input:** While `ntpdf/pdfdoc` bounds input size, stream inflation, filter chains, predictors, cross-reference offsets, and tree/form recursion, a Go library cannot preempt a hung CPU loop inside an in-process parser once preflight passes. Hosts handling untrusted PDFs that require hard wall-clock termination should run `pdfdoc.Open` and page extraction in a separate, killable worker process (as `gloss` does).
 
 ### Sanitizing PDF-derived strings
 
@@ -152,7 +160,7 @@ PDF metadata, error messages, and host-supplied paths can carry C0/C1 control se
 - **WASI builds have no built-in image renderer.** `DefaultRendererFactory` returns nil. Hosts that need rasterization there can wire up a server-side rasterizer via `RendererFactory`; custom factories supplied in WASM environments are also responsible for their own resource caps (file size, request timeouts) since `Config.Limits.MaxFileBytes` is only enforced by the default local-filesystem renderer.
 - **PDFs are read fully into memory before rasterization.** `go-pdfium`'s `OpenDocument` takes a `[]byte`. For typical documents (single-digit MB) this is fine; multi-hundred-MB PDFs will use proportional RAM. Streaming open is possible via a custom RendererFactory.
 - **Per-page text extraction failures (including library panics) drop the page to an empty placeholder** rather than failing the whole load. A page that ledongthuc/pdf can't decode or that triggers a parser panic renders as a blank grid + image placeholder; ImageMode still rasterizes it correctly.
-- **Image placeholders count XObject entries with `/Subtype /Image`** in the page resources. Inline images (BI/EI operators inside the content stream) aren't counted — uncommon enough not to matter for most PDFs, easy to add later if you encounter a doc that uses them heavily.
+- **Image placeholders count drawn images (`Do` image XObjects, nested `Form` XObjects, and inline `BI` images)** in the page content stream, up to `Limits.MaxImagesPerPage`. Images listed in `/Resources/XObject` that are never drawn on the page are not counted.
 - **Kitty placement composition through lipgloss** is best-effort. `ntpicture.Picture.View()` embeds the Kitty placement escapes directly in the rendered string, which composes cleanly inside `lipgloss.JoinVertical` and basic borders. Glyph mode has no such caveat.
 - **Vibe coded** This comment was inserted by a human.
 

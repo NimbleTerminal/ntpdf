@@ -75,6 +75,14 @@ type Limits struct {
 	// causing make([]pdfPage, n) to OOM before any page is read.
 	MaxPages int
 
+	// MaxStreamBytes caps how many bytes a single PDF stream may inflate
+	// to during text-mode preflight. Zero = 256 MiB default.
+	MaxStreamBytes int64
+
+	// MaxInflatedBytes caps the total bytes all PDF streams in a document
+	// may inflate to during text-mode preflight. Zero = 1 GiB default.
+	MaxInflatedBytes int64
+
 	// MaxImagesPerPage caps the number of XObject image placeholders
 	// counted per page. Zero = 1024 default. Hostile /XObject dicts
 	// with millions of entries can't burn the load thread.
@@ -100,6 +108,12 @@ func (l *Limits) applyDefaults() {
 	}
 	if l.MaxPages == 0 {
 		l.MaxPages = 10_000
+	}
+	if l.MaxStreamBytes == 0 {
+		l.MaxStreamBytes = 256 << 20 // 256 MiB
+	}
+	if l.MaxInflatedBytes == 0 {
+		l.MaxInflatedBytes = 1 << 30 // 1 GiB
 	}
 	if l.MaxImagesPerPage == 0 {
 		l.MaxImagesPerPage = 1024

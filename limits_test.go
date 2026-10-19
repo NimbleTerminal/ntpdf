@@ -1,11 +1,16 @@
 package ntpdf
 
 import (
+	"bytes"
+	"compress/zlib"
+	"fmt"
 	"image"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/ledongthuc/pdf"
+	"nimbleterminal.dev/ntpdf/pdfdoc"
 )
 
 func TestSanitizeForTerminalDropsControlsAndBidi(t *testing.T) {
@@ -143,20 +148,24 @@ func TestWithLimitsDoesNotStatPath(t *testing.T) {
 }
 
 func TestExtractPageRecoversFromPanic(t *testing.T) {
-	// Use a real PDF as the recovery substrate — Example.pdf parses
-	// cleanly, so this test mostly verifies the defer/recover scaffold
-	// doesn't break the happy path. The panic case is exercised by
-	// extractPage's defer block; we drive it directly through a
-	// constructed-but-invalid pdf.Page below.
-	_ = repoTestdata(t, "Example.pdf")
-	// Null-page input shouldn't crash even though Content() would
-	// dereference its V field. extractPage's IsNull guard short-circuits.
-	out := extractPage(pdf.Page{}, Limits{MaxImagesPerPage: 1024})
-	if out.media != defaultMediaBox() {
-		t.Errorf("null page: media = %+v, want default", out.media)
+	path := repoTestdata(t, "Example.pdf")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(out.runs) != 0 {
-		t.Errorf("null page: runs len = %d, want 0", len(out.runs))
+	doc, err := pdfdoc.Open(data, pdfdoc.Limits{MaxImageDraws: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nil-doc and out-of-range page inputs must return the default media box
+	// and zero runs without panicking.
+	for _, out := range []pdfPage{extractPage(nil, 1), extractPage(doc, 0)} {
+		if out.media != defaultMediaBox() {
+			t.Errorf("invalid page: media = %+v, want default", out.media)
+		}
+		if len(out.runs) != 0 {
+			t.Errorf("invalid page: runs len = %d, want 0", len(out.runs))
+		}
 	}
 }
 
@@ -181,20 +190,123 @@ func TestMaxPagesRejected(t *testing.T) {
 }
 
 func TestCountPageImagesHonorsCap(t *testing.T) {
-	// Surrogate: countPageImages on Example.pdf page 1 (1 image) with a
+	// Surrogate: PageImages on Example.pdf page 1 (1 image) with a
 	// tiny cap returns at most cap. We only verify it doesn't exceed.
 	path := repoTestdata(t, "Example.pdf")
-	f, r, err := pdf.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	got := countPageImages(r.Page(1), 0 /* uncapped */)
+	doc, err := pdfdoc.Open(data, pdfdoc.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := doc.PageImages(1)
 	if got != 1 {
 		t.Fatalf("baseline: expected 1 image on page 1, got %d", got)
 	}
-	got = countPageImages(r.Page(1), 1)
-	if got > 1 {
+	capped, err := pdfdoc.Open(data, pdfdoc.Limits{MaxImageDraws: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := capped.PageImages(1); got > 1 {
 		t.Errorf("cap=1 but counted %d", got)
+	}
+}
+
+func TestTextModeRejectsHostilePDFs(t *testing.T) {
+	deflate := func(raw []byte) []byte {
+		var b bytes.Buffer
+		w := zlib.NewWriter(&b)
+		if _, err := w.Write(raw); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return b.Bytes()
+	}
+	buildPDF := func(trailer string, objects ...string) []byte {
+		var b bytes.Buffer
+		b.WriteString("%PDF-1.4\n")
+		offsets := make([]int, len(objects))
+		for i, body := range objects {
+			offsets[i] = b.Len()
+			fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", i+1, body)
+		}
+		xref := b.Len()
+		fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(objects)+1)
+		for _, off := range offsets {
+			fmt.Fprintf(&b, "%010d 00000 n \n", off)
+		}
+		fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R %s >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, trailer, xref)
+		return b.Bytes()
+	}
+
+	// 1. Oversized Flate inflation: 8 KiB decoded stream rejected when MaxStreamBytes=1024.
+	inflated := deflate(bytes.Repeat([]byte("A"), 8192))
+	oversizedStream := buildPDF("",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream", len(inflated), inflated),
+	)
+
+	// 2. Bad predictor parameters on a Flate stream in a valid PDF shell.
+	comp := deflate([]byte("q Q\n"))
+	badPredictor := buildPDF("",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 4 0 R >>",
+		fmt.Sprintf("<< /Length %d /Filter /FlateDecode /DecodeParms << /Predictor 12 /Columns 2147483647 >> >>\nstream\n%s\nendstream", len(comp), comp),
+	)
+
+	// 3. Hidden xref inside a string referenced by /Prev.
+	hiddenObjs := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>",
+		"(xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>\n%)",
+	}
+	baseHidden := buildPDF("", hiddenObjs...)
+	hiddenOffset := bytes.Index(baseHidden, []byte("xref\n"))
+	hiddenXref := buildPDF(fmt.Sprintf("/Prev %d", hiddenOffset), hiddenObjs...)
+
+	// 4. Hidden object inside a string literal referenced by the xref table.
+	spoofBase := buildPDF("",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>",
+		"(ordinary)",
+		"(4 0 obj\n<< /Length 3 >>\nstream\nabc\nendstream\nendobj)",
+	)
+	real4 := bytes.Index(spoofBase, []byte("4 0 obj"))
+	fake4 := bytes.LastIndex(spoofBase, []byte("4 0 obj"))
+	hiddenObj := bytes.Replace(spoofBase, fmt.Appendf(nil, "%010d 00000 n", real4), fmt.Appendf(nil, "%010d 00000 n", fake4), 1)
+
+	for _, tc := range []struct {
+		name   string
+		data   []byte
+		limits Limits
+	}{
+		{"oversized inflate", oversizedStream, Limits{MaxStreamBytes: 1024}},
+		{"bad predictor", badPredictor, Limits{}},
+		{"hidden xref", hiddenXref, Limits{}},
+		{"hidden object", hiddenObj, Limits{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Verify the raw ledongthuc/pdf reader (which ntpdf used to call
+			// directly without preflight) accepts the document.
+			if _, err := pdf.NewReader(bytes.NewReader(tc.data), int64(len(tc.data))); err != nil {
+				t.Fatalf("precondition: pdf.NewReader rejected %s: %v", tc.name, err)
+			}
+			// Verify ntpdf's text-mode loader now rejects it.
+			m := NewWithConfig(Config{Cols: 80, Rows: 24, Limits: tc.limits})
+			cmd := m.SetPDFData(tc.name, tc.data)
+			msg := cmd()
+			if _, ok := msg.(pdfErrMsg); !ok {
+				t.Fatalf("expected pdfErrMsg for %s, got %T", tc.name, msg)
+			}
+		})
 	}
 }
