@@ -1,9 +1,10 @@
 # CHANGELOG
 
-## Unreleased
+## v0.5.0 (2026-10-19)
 
 - Add `nimbleterminal.dev/ntpdf/pdfdoc`, a headless, resource-budgeted PDF reader with fail-closed stream, filter, predictor, object-stream, and cross-reference preflight checks, plus panic-guarded document metadata (`Version`, `Info`, `FormatDate`) and page queries (`MediaBox`, `PageSize`, `PageText`, `PageTextRuns`, `PageImages`).
 - Route `ntpdf` text-mode loading (`SetPDF`, `SetPDFData`, `InitialPath`, `InitialData`) through `ntpdf/pdfdoc` and add `MaxStreamBytes` and `MaxInflatedBytes` caps to `ntpdf.Limits`.
+- Surface `pdfdoc` metadata (`Version`, `Info`, per-page character count) in the `inspector` demo and emit trailer `/Info` metadata in the example PDF builder.
 - Migrate browser-WASM PDFium shim from `github.com/NimbleMarkets/booba-shim` to `nimbleterminal.dev/ntshim` v0.6.0.
 - Upgrade `nimbleterminal.dev/ntpicture` to v0.1.1 and `github.com/NimbleMarkets/go-booba` to v0.10.3.
 
