@@ -205,30 +205,231 @@ func FuzzPDFStreamPreflight(f *testing.F) {
 }
 
 func TestPDFHiddenObjectReferenceRejected(t *testing.T) {
-	data := pdfFile("1.4", "", "<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Count 0 /Kids [] >>", "(ordinary)", "(4 0 obj\n<< /Length 3 >>\nstream\nabc\nendstream\nendobj)")
-	if err := checkPDFStreams(data, Limits{}); err != nil {
-		t.Fatal(err)
-	}
-	real := bytes.Index(data, []byte("4 0 obj"))
-	hidden := bytes.LastIndex(data, []byte("4 0 obj"))
-	data = bytes.Replace(data, fmt.Appendf(nil, "%010d 00000 n", real), fmt.Appendf(nil, "%010d 00000 n", hidden), 1)
-	if err := checkPDFStreams(data, Limits{}); err == nil {
-		t.Fatal("xref followed an object hidden inside a string")
+	spoofObj := "4 0 obj\n<< /Length 3 >>\nstream\nabc\nendstream\nendobj"
+	for _, tc := range []struct {
+		name      string
+		container string
+	}{
+		{"string", "(" + spoofObj + ")"},
+		{"comment", "% " + strings.ReplaceAll(spoofObj, "\n", " ") + "\n(ok)"},
+		{"skipped stream", fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(spoofObj), spoofObj)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := pdfFile("1.4", "",
+				"<< /Type /Catalog /Pages 2 0 R >>",
+				"<< /Type /Pages /Count 0 /Kids [] >>",
+				tc.container,
+				"(ordinary)",
+			)
+			if err := checkPDFStreams(data, Limits{}); err != nil {
+				t.Fatalf("baseline checkPDFStreams: %v", err)
+			}
+			real := bytes.LastIndex(data, []byte("4 0 obj"))
+			hidden := bytes.Index(data, []byte("4 0 obj"))
+			if hidden == real {
+				t.Fatalf("failed to locate distinct hidden 4 0 obj in %s", tc.name)
+			}
+			mutated := bytes.Replace(data, fmt.Appendf(nil, "%010d 00000 n", real), fmt.Appendf(nil, "%010d 00000 n", hidden), 1)
+			err := checkPDFStreams(mutated, Limits{})
+			if err == nil {
+				t.Fatalf("xref followed an object hidden inside a %s", tc.name)
+			}
+			wantSub := fmt.Sprintf("object 4 at offset %d", hidden)
+			if !strings.Contains(err.Error(), wantSub) {
+				t.Fatalf("error %q missing %q", err, wantSub)
+			}
+		})
 	}
 }
 
 func TestPDFHiddenCrossReferenceRejected(t *testing.T) {
+	spoofXref := "xref\n0 1\n0000000000 65535 f \ntrailer\n<< /Size 1 >>"
+	for _, tc := range []struct {
+		name      string
+		container string
+	}{
+		{"string", "(" + spoofXref + ")"},
+		{"comment", "% " + strings.ReplaceAll(spoofXref, "\n", " ") + "\n(ok)"},
+		{"skipped stream", fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(spoofXref), spoofXref)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := []string{
+				"<< /Type /Catalog /Pages 2 0 R >>",
+				"<< /Type /Pages /Count 0 /Kids [] >>",
+				tc.container,
+			}
+			base := pdfFile("1.4", "", objects...)
+			hidden := bytes.Index(base, []byte("xref"))
+			withPrev := pdfFile("1.4", fmt.Sprintf("/Prev %d", hidden), objects...)
+			err := checkPDFStreams(withPrev, Limits{})
+			if err == nil {
+				t.Fatalf("Prev followed a hidden xref inside %s", tc.name)
+			}
+			wantPrev := fmt.Sprintf("/Prev %d", hidden)
+			if !strings.Contains(err.Error(), wantPrev) {
+				t.Fatalf("error %q missing %q", err, wantPrev)
+			}
+
+			withXRefStm := pdfFile("1.4", fmt.Sprintf("/XRefStm %d", hidden), objects...)
+			err = checkPDFStreams(withXRefStm, Limits{})
+			if err == nil {
+				t.Fatalf("XRefStm followed a hidden xref inside %s", tc.name)
+			}
+			wantStm := fmt.Sprintf("/XRefStm %d", hidden)
+			if !strings.Contains(err.Error(), wantStm) {
+				t.Fatalf("error %q missing %q", err, wantStm)
+			}
+		})
+	}
+
 	objects := []string{"<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Count 0 /Kids [] >>", "(xref\n0 1\n0000000000 65535 f\ntrailer\n<< /Size 1 >>)"}
 	data := pdfFile("1.4", "", objects...)
 	hidden := bytes.Index(data, []byte("xref\n"))
-	data = pdfFile("1.4", fmt.Sprintf("/Prev %d", hidden), objects...)
-	if err := checkPDFStreams(data, Limits{}); err == nil {
-		t.Fatal("Prev followed a hidden xref")
-	}
-	data = pdfFile("1.4", "", objects...)
 	data = append(data, []byte(fmt.Sprintf("(\nstartxref\n%d\n)\n%%%%EOF\n", hidden))...)
 	if err := checkPDFStreams(data, Limits{}); err == nil {
 		t.Fatal("final startxref inside a string was accepted")
+	}
+}
+
+func TestPDFInUseEntryAtOffsetZero(t *testing.T) {
+	// Case 1a: Quartz PDFContext-style unreferenced in-use entry at offset 0
+	// (0000000000 00000 n) in a classic xref table must open cleanly.
+	base := samplePDF()
+	// Append an extra in-use entry at offset 0 (object 183) via a subsection.
+	var withUnrefZero bytes.Buffer
+	xrefIdx := bytes.Index(base, []byte("trailer\n"))
+	withUnrefZero.Write(base[:xrefIdx])
+	withUnrefZero.WriteString("183 1\n0000000000 00000 n \n")
+	withUnrefZero.Write(base[xrefIdx:])
+	doc, err := Open(withUnrefZero.Bytes(), Limits{})
+	if err != nil {
+		t.Fatalf("unreferenced in-use xref entry at offset 0 rejected: %v", err)
+	}
+	if doc.NumPages() != 2 {
+		t.Fatalf("NumPages() = %d, want 2", doc.NumPages())
+	}
+
+	// Case 1b: Referenced in-use entry at offset 0 resolves to null as a free
+	// object would in ledongthuc/pdf, so the document still opens cleanly.
+	refZero := pdfFile("1.4", "",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /PieceInfo 4 0 R >>",
+		"<< /Unused true >>",
+	)
+	real4 := bytes.Index(refZero, []byte("4 0 obj"))
+	refZero = bytes.Replace(refZero, fmt.Appendf(nil, "%010d 00000 n", real4), []byte("0000000000 00000 n"), 1)
+	if _, err := Open(refZero, Limits{}); err != nil {
+		t.Fatalf("referenced in-use xref entry at offset 0 rejected: %v", err)
+	}
+
+	// Case 1c: An indirect integer used by preflight (e.g. stream /Length 4 0 R)
+	// whose xref entry is at offset 0 must be refused naming the object.
+	indirectLen := pdfFile("1.4", "",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 5 0 R >>",
+		"3",
+		"<< /Length 4 0 R >>\nstream\nq Q\nendstream",
+	)
+	lenOff := bytes.Index(indirectLen, []byte("4 0 obj"))
+	indirectLenZero := bytes.Replace(indirectLen, fmt.Appendf(nil, "%010d 00000 n", lenOff), []byte("0000000000 00000 n"), 1)
+	err = checkPDFStreams(indirectLenZero, Limits{})
+	if err == nil {
+		t.Fatal("indirect /Length resolving to offset-0 xref entry was accepted")
+	}
+	if !strings.Contains(err.Error(), "object 4") {
+		t.Fatalf("error %q did not name object 4", err)
+	}
+}
+
+func TestPDFLinearizedStartXrefZero(t *testing.T) {
+	// Build a small original linearized PDF fixture:
+	// First-page section has the /Linearized dictionary, first-page xref, and
+	// first-page trailer ending with placeholder `startxref 0`.
+	// Main section has the remaining objects, main xref, and final `startxref`
+	// pointing at the first-page xref (whose /Prev points at the main xref).
+	buildLinearized := func(prevOverride int, finalStartXrefOverride int) ([]byte, int, int) {
+		var b bytes.Buffer
+		b.WriteString("%PDF-1.4\n")
+		off4 := b.Len()
+		b.WriteString("4 0 obj\n<< /Linearized 1 /L 1000 /O 6 /E 500 /N 1 /T 800 /H [0 0] >>\nendobj\n")
+		off5 := b.Len()
+		b.WriteString("5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n")
+		off6 := b.Len()
+		b.WriteString("6 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>\nendobj\n")
+		off7 := b.Len()
+		stream := "BT /F1 12 Tf 10 10 Td (Linearized OK) Tj ET"
+		fmt.Fprintf(&b, "7 0 obj\n<< /Length %d >>\nstream\n%s\nendstream\nendobj\n", len(stream), stream)
+
+		firstXref := b.Len()
+		fmt.Fprintf(&b, "xref\n4 4\n%010d 00000 n \n%010d 00000 n \n%010d 00000 n \n%010d 00000 n \n", off4, off5, off6, off7)
+
+		// Reserve fixed-width /Prev placeholder so offsets after the first-page trailer stay exact.
+		prevPlaceholder := "0000000000"
+		firstTrailer := fmt.Sprintf("trailer\n<< /Size 8 /Prev %s /Root 1 0 R >>\nstartxref\n0\n%%%%EOF\n", prevPlaceholder)
+		firstStartXrefByte := b.Len() + strings.Index(firstTrailer, "startxref")
+		b.WriteString(firstTrailer)
+
+		off1 := b.Len()
+		b.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+		off2 := b.Len()
+		b.WriteString("2 0 obj\n<< /Type /Pages /Kids [6 0 R] /Count 1 >>\nendobj\n")
+		off3 := b.Len()
+		b.WriteString("3 0 obj\n<< /Info true >>\nendobj\n")
+
+		mainXref := b.Len()
+		fmt.Fprintf(&b, "xref\n0 4\n0000000000 65535 f \n%010d 00000 n \n%010d 00000 n \n%010d 00000 n \n", off1, off2, off3)
+		finalTarget := firstXref
+		if finalStartXrefOverride >= 0 {
+			finalTarget = finalStartXrefOverride
+		}
+		finalTail := fmt.Sprintf("trailer\n<< /Size 8 >>\nstartxref\n%d\n%%%%EOF\n", finalTarget)
+		finalStartXrefByte := b.Len() + strings.Index(finalTail, "startxref")
+		b.WriteString(finalTail)
+
+		prevTarget := mainXref
+		if prevOverride >= 0 {
+			prevTarget = prevOverride
+		}
+		out := bytes.Replace(b.Bytes(), []byte("/Prev "+prevPlaceholder), fmt.Appendf(nil, "/Prev %010d", prevTarget), 1)
+		_ = firstStartXrefByte
+		return out, prevTarget, finalStartXrefByte
+	}
+
+	// Valid linearized PDF opens and extracts text.
+	valid, _, _ := buildLinearized(-1, -1)
+	doc, err := Open(valid, Limits{})
+	if err != nil {
+		t.Fatalf("valid linearized PDF rejected: %v", err)
+	}
+	if doc.NumPages() != 1 {
+		t.Fatalf("NumPages() = %d, want 1", doc.NumPages())
+	}
+	txt, err := doc.PageText(1)
+	if err != nil || !strings.Contains(txt, "Linearized OK") {
+		t.Fatalf("PageText(1) = %q, %v; want 'Linearized OK'", txt, err)
+	}
+
+	// Linearized PDF whose /Prev chain points to a bogus offset is still refused.
+	badPrev, prevOff, _ := buildLinearized(5, -1)
+	err = checkPDFStreams(badPrev, Limits{})
+	if err == nil {
+		t.Fatal("linearized PDF with invalid /Prev was accepted")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("/Prev %d", prevOff)) {
+		t.Fatalf("error %q missing '/Prev %d'", err, prevOff)
+	}
+
+	// A PDF whose final startxref is 0 is still refused with byte offset.
+	badFinal, _, finalByte := buildLinearized(-1, 0)
+	err = checkPDFStreams(badFinal, Limits{})
+	if err == nil {
+		t.Fatal("PDF with final startxref 0 was accepted")
+	}
+	wantFinal := fmt.Sprintf("startxref 0 at byte %d", finalByte)
+	if !strings.Contains(err.Error(), wantFinal) {
+		t.Fatalf("error %q missing %q", err, wantFinal)
 	}
 }
 
@@ -428,3 +629,4 @@ func TestOpenEnforcesLimits(t *testing.T) {
 		t.Fatal("expected error on expired Deadline")
 	}
 }
+

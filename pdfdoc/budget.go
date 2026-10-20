@@ -194,10 +194,11 @@ type pdfStreamBudget struct {
 	objectStreams  map[int64][]int64
 	current        pdfRef
 	currentOffset  int64
-	xrefOffsets    map[int64]bool
-	xrefTargets    []int64
-	lastStartXref  int
-	actualIntegers map[pdfRef]int64
+	xrefOffsets         map[int64]bool
+	xrefTargets         []pdfXrefTarget
+	lastStartXref       int
+	lastStartXrefTarget pdfXrefTarget
+	actualIntegers      map[pdfRef]int64
 	usedIntegers   map[pdfRef]bool
 
 	total, maxStream, maxTotal, maxPixels int64
@@ -315,9 +316,12 @@ func (b *pdfStreamBudget) scan(data []byte, depth int) error {
 		if expectXref {
 			offset, ok := v.(int64)
 			if !ok || offset < 0 {
-				return errors.New("invalid PDF startxref")
+				return fmt.Errorf("invalid PDF startxref at byte %d", b.lastStartXref)
 			}
-			b.xrefTargets = append(b.xrefTargets, offset)
+			b.lastStartXrefTarget = pdfXrefTarget{
+				source: fmt.Sprintf("startxref %d at byte %d", offset, b.lastStartXref),
+				offset: offset,
+			}
 			expectXref = false
 		}
 		if keyword, ok := v.(string); ok && keyword == "startxref" {

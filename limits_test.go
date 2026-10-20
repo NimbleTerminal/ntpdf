@@ -3,6 +3,8 @@ package ntpdf
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -122,6 +124,24 @@ func TestWithLimitsClampsDPI(t *testing.T) {
 	}
 	if cap.lastDPI != 150 {
 		t.Errorf("inner DPI = %d, want 150 (clamped from 600)", cap.lastDPI)
+	}
+
+	// Also verify ContextRenderer + RenderPageContext clamping and pre-cancel behavior.
+	cr, ok := r.(ContextRenderer)
+	if !ok {
+		t.Fatalf("limitedRenderer does not implement ContextRenderer")
+	}
+	if _, err := cr.RenderPageContext(context.Background(), 1, 900); err != nil {
+		t.Fatalf("RenderPageContext: %v", err)
+	}
+	if cap.lastDPI != 150 {
+		t.Errorf("inner DPI via RenderPageContext = %d, want 150", cap.lastDPI)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := RenderPageContext(ctx, r, 1, 100); !errors.Is(err, context.Canceled) {
+		t.Errorf("RenderPageContext with cancelled ctx = %v, want context.Canceled", err)
 	}
 }
 

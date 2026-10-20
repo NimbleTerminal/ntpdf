@@ -16,14 +16,18 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"sync"
 
 	"nimbleterminal.dev/ntshim/pdfium"
 )
 
-// jsRenderer adapts a pdfium.Document to the Renderer interface.
+// jsRenderer adapts a pdfium.Document to the Renderer and ContextRenderer
+// interfaces.
 type jsRenderer struct {
+	mu              sync.Mutex
 	doc             *pdfium.Document
 	maxRenderPixels int
+	stopped         bool
 }
 
 // DefaultRendererFactory returns a RendererFactory that delegates to
@@ -60,6 +64,32 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 // when the projected pixel count exceeds the budget, DPI is reduced to
 // fit (graceful degradation matching the native implementation).
 func (r *jsRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
+	return r.RenderPageContext(context.Background(), pageNum, dpi)
+}
+
+// RenderPageContext rasterizes a 1-indexed page with context cancellation
+// support. It passes ctx through to ntshim/pdfium's Document.RenderPage and
+// selects on ctx.Done() (since ntshim v0.6.0's JS bridge runs @embedpdf/pdfium
+// on the main JS thread and does not yet abort in-flight promises via ctx).
+// When ctx is cancelled, the renderer is marked as stopped so subsequent calls
+// return ErrRendererStopped, and the underlying Document is closed.
+func (r *jsRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int) (image.Image, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.Lock()
+	if r.stopped {
+		r.mu.Unlock()
+		return nil, ErrRendererStopped
+	}
+	if err := ctx.Err(); err != nil {
+		r.stopped = true
+		r.mu.Unlock()
+		_ = r.doc.Close()
+		return nil, fmt.Errorf("ntshim/pdfium RenderPage page=%d: %w", pageNum, err)
+	}
+	r.mu.Unlock()
+
 	if pageNum < 1 {
 		return nil, fmt.Errorf("invalid page %d (1-indexed)", pageNum)
 	}
@@ -69,7 +99,44 @@ func (r *jsRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
 	if r.maxRenderPixels > 0 {
 		dpi = r.clampDPIToBudget(pageNum, dpi)
 	}
-	return r.doc.RenderPage(context.Background(), pageNum-1, dpi)
+	if err := ctx.Err(); err != nil {
+		r.mu.Lock()
+		r.stopped = true
+		r.mu.Unlock()
+		_ = r.doc.Close()
+		return nil, fmt.Errorf("ntshim/pdfium RenderPage page=%d: %w", pageNum, err)
+	}
+
+	type renderResult struct {
+		img image.Image
+		err error
+	}
+	ch := make(chan renderResult, 1)
+	go func() {
+		img, err := r.doc.RenderPage(ctx, pageNum-1, dpi)
+		ch <- renderResult{img: img, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		r.mu.Lock()
+		r.stopped = true
+		r.mu.Unlock()
+		go func() {
+			<-ch
+			_ = r.doc.Close()
+		}()
+		return nil, fmt.Errorf("ntshim/pdfium RenderPage page=%d: %w", pageNum, ctx.Err())
+	case res := <-ch:
+		if err := ctx.Err(); err != nil {
+			r.mu.Lock()
+			r.stopped = true
+			r.mu.Unlock()
+			_ = r.doc.Close()
+			return nil, fmt.Errorf("ntshim/pdfium RenderPage page=%d: %w", pageNum, err)
+		}
+		return res.img, res.err
+	}
 }
 
 // clampDPIToBudget queries the page's size in points and returns a DPI

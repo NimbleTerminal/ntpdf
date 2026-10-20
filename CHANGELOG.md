@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v0.5.1 (2026-10-20)
+
+- Treat uncompressed in-use cross-reference entries at offset `0` (`0000000000 00000 n`, emitted by Quartz PDFContext and other writers for missing objects) as free in `pdfdoc` preflight unless referenced as an indirect integer by stream/predictor preflight, while continuing to reject any non-zero offset that does not land on a validated `N G obj` boundary.
+- Check only the final `startxref` before the last `%%EOF` in `pdfdoc` cross-reference preflight so linearized PDFs whose first-page trailer carries a placeholder `startxref 0` open cleanly while `/Prev` and `/XRefStm` chains remain validated.
+- Include exact object numbers and byte offsets in `pdfdoc` cross-reference boundary errors (e.g. `object 183 at offset 0`, `startxref 0 at byte 116`, `/Prev 42`).
+- Add `ContextRenderer`, `RenderPageContext`, and `ErrRendererStopped` to support context-cancellable page rasterization, configuring wazero with `WithCloseOnContextDone(true)` and killing/invalidating the worker instance on in-flight native cancellation so the pool slot is released immediately.
+
 ## v0.5.0 (2026-10-19)
 
 - Add `nimbleterminal.dev/ntpdf/pdfdoc`, a headless, resource-budgeted PDF reader with fail-closed stream, filter, predictor, object-stream, and cross-reference preflight checks, plus panic-guarded document metadata (`Version`, `Info`, `FormatDate`) and page queries (`MediaBox`, `PageSize`, `PageText`, `PageTextRuns`, `PageImages`).

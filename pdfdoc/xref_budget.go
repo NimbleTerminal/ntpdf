@@ -2,6 +2,7 @@ package pdfdoc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -15,26 +16,39 @@ type pdfXrefEntry struct {
 	index      int64
 }
 
+type pdfXrefTarget struct {
+	source string
+	offset int64
+}
+
 func (b *pdfStreamBudget) checkReferences() error {
-	for _, offset := range b.xrefTargets {
-		if !b.xrefOffsets[offset] {
-			return errors.New("PDF cross-reference pointer is outside validated boundaries")
+	targets := b.xrefTargets
+	if b.lastStartXref >= 0 {
+		targets = append(targets, b.lastStartXrefTarget)
+	}
+	for _, target := range targets {
+		if !b.xrefOffsets[target.offset] {
+			return fmt.Errorf("PDF cross-reference pointer is outside validated boundaries (%s)", target.source)
 		}
 	}
 	for ref := range b.usedIntegers {
 		n, ok := b.actualIntegers[ref]
 		if !ok || n != b.integers[ref] {
-			return errors.New("PDF indirect integer does not match validated object")
+			return fmt.Errorf("PDF indirect integer does not match validated object (object %d)", ref.id)
 		}
 	}
 	for _, x := range b.references {
 		if x.compressed {
 			ids := b.objectStreams[x.offset]
 			if x.index < 0 || x.index >= int64(len(ids)) || ids[x.index] != x.ref.id {
-				return errors.New("PDF xref points outside validated object stream")
+				return fmt.Errorf("PDF xref points outside validated object stream (object %d in stream %d at index %d)", x.ref.id, x.offset, x.index)
+			}
+		} else if x.offset == 0 {
+			if b.usedIntegers[x.ref] {
+				return fmt.Errorf("PDF indirect integer resolves to free xref entry at offset 0 (object %d)", x.ref.id)
 			}
 		} else if ref, ok := b.objects[x.offset]; !ok || ref != x.ref {
-			return errors.New("PDF xref points outside validated object boundaries")
+			return fmt.Errorf("PDF xref points outside validated object boundaries (object %d at offset %d)", x.ref.id, x.offset)
 		}
 	}
 	return nil
@@ -263,9 +277,12 @@ func (b *pdfStreamBudget) xrefPointers(d pdfDict) error {
 		if v, exists := d[key]; exists {
 			offset, ok := v.(int64)
 			if !ok || offset < 0 {
-				return errors.New("invalid PDF cross-reference pointer")
+				return fmt.Errorf("invalid PDF cross-reference pointer (/%s)", key)
 			}
-			b.xrefTargets = append(b.xrefTargets, offset)
+			b.xrefTargets = append(b.xrefTargets, pdfXrefTarget{
+				source: fmt.Sprintf("/%s %d", key, offset),
+				offset: offset,
+			})
 		}
 	}
 	return nil

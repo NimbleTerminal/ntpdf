@@ -9,7 +9,10 @@
 
 package ntpdf
 
-import "image"
+import (
+	"context"
+	"image"
+)
 
 // withLimits returns a RendererFactory that decorates `inner` with the
 // path-agnostic resource caps (currently MaxRenderDPI). Custom
@@ -42,10 +45,14 @@ type limitedRenderer struct {
 }
 
 func (l *limitedRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
+	return l.RenderPageContext(context.Background(), pageNum, dpi)
+}
+
+func (l *limitedRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int) (image.Image, error) {
 	if l.limits.MaxRenderDPI > 0 && dpi > l.limits.MaxRenderDPI {
 		dpi = l.limits.MaxRenderDPI
 	}
-	return l.inner.RenderPage(pageNum, dpi)
+	return RenderPageContext(ctx, l.inner, pageNum, dpi)
 }
 
 func (l *limitedRenderer) Close() error { return l.inner.Close() }

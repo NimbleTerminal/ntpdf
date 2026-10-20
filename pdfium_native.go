@@ -12,6 +12,7 @@
 package ntpdf
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -24,6 +25,9 @@ import (
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/webassembly"
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 )
 
 // pdfium pool initialisation is process-wide and somewhat expensive
@@ -41,11 +45,18 @@ var (
 // parallel page prefetch later) without ballooning memory; MinIdle:1
 // keeps one warm worker ready so the first Render is nearly instant
 // after the cold-start probe.
+//
+// RuntimeConfig enables WithCloseOnContextDone so that pdfiumInstance.Kill
+// (which cancels the worker's wazero context) interrupts in-flight WASM
+// execution immediately when RenderPageContext's ctx is cancelled.
 func pdfiumPoolConfig() webassembly.Config {
 	return webassembly.Config{
 		MinIdle:  1,
 		MaxIdle:  1,
 		MaxTotal: 4,
+		RuntimeConfig: wazero.NewRuntimeConfig().
+			WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
+			WithCloseOnContextDone(true),
 	}
 }
 
@@ -64,6 +75,11 @@ type pdfiumRenderer struct {
 	instance      pdfium.Pdfium
 	docRef        references.FPDF_DOCUMENT
 	cleanupHandle runtime.Cleanup
+	stopped       bool
+
+	// beforeRender is an optional test hook invoked while holding r.mu
+	// after the cancellation AfterFunc has been armed.
+	beforeRender func(ctx context.Context)
 
 	// maxRenderPixels caps the bitmap area of a single rasterized page.
 	// 0 = disabled. When the projected pixel count at the caller-supplied
@@ -156,10 +172,33 @@ func cleanUpPdfium(args pdfiumCleanupArgs) {
 // to fit (graceful degradation) — the user gets a chunkier render
 // rather than an error.
 func (r *pdfiumRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
+	return r.RenderPageContext(context.Background(), pageNum, dpi)
+}
+
+// RenderPageContext rasterizes a 1-indexed page with context cancellation
+// support. If ctx is cancelled before or during the render, the underlying
+// pdfium worker is stopped (returning the pool slot), an error wrapping
+// ctx.Err() is returned, and the renderer is marked as stopped so subsequent
+// calls fail with ErrRendererStopped.
+func (r *pdfiumRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int) (image.Image, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.stopped {
+		return nil, ErrRendererStopped
+	}
 	if r.instance == nil {
 		return nil, errors.New("pdfium renderer closed")
+	}
+	if err := ctx.Err(); err != nil {
+		r.cleanupHandle.Stop()
+		_, _ = r.instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: r.docRef})
+		_ = r.instance.Close()
+		r.instance = nil
+		r.stopped = true
+		return nil, fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, err)
 	}
 	if pageNum < 1 {
 		return nil, fmt.Errorf("invalid page %d (1-indexed)", pageNum)
@@ -167,9 +206,45 @@ func (r *pdfiumRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
 	if dpi <= 0 {
 		dpi = DefaultRenderDPI
 	}
+
+	inst := r.instance
+	killDone := make(chan struct{})
+	stopKill := context.AfterFunc(ctx, func() {
+		defer close(killDone)
+		_ = inst.Kill()
+	})
+	finishCancel := func(cleanup func()) error {
+		if !stopKill() {
+			<-killDone
+			r.cleanupHandle.Stop()
+			r.instance = nil
+			r.stopped = true
+			return fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, ctx.Err())
+		}
+		if err := ctx.Err(); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			r.cleanupHandle.Stop()
+			_, _ = r.instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: r.docRef})
+			_ = r.instance.Close()
+			r.instance = nil
+			r.stopped = true
+			return fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, err)
+		}
+		return nil
+	}
+
 	if r.maxRenderPixels > 0 {
 		dpi = r.clampDPIToBudget(pageNum, dpi)
 	}
+	if r.beforeRender != nil {
+		r.beforeRender(ctx)
+	}
+	if ctx.Err() != nil {
+		return nil, finishCancel(nil)
+	}
+
 	resp, err := r.instance.RenderPageInDPI(&requests.RenderPageInDPI{
 		Page: requests.Page{
 			ByIndex: &requests.PageByIndex{
@@ -179,6 +254,13 @@ func (r *pdfiumRenderer) RenderPage(pageNum, dpi int) (image.Image, error) {
 		},
 		DPI: dpi,
 	})
+	var respCleanup func()
+	if resp != nil && err == nil {
+		respCleanup = resp.Cleanup
+	}
+	if cancelErr := finishCancel(respCleanup); cancelErr != nil {
+		return nil, cancelErr
+	}
 	if err != nil {
 		return nil, fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, err)
 	}
