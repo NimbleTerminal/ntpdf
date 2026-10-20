@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"nimbleterminal.dev/ntpdf"
+	headless "nimbleterminal.dev/ntpdf/pdfdoc"
 )
 
 func TestGeneratedPDFsParseAndRender(t *testing.T) {
@@ -19,6 +20,22 @@ func TestGeneratedPDFsParseAndRender(t *testing.T) {
 
 	for _, s := range samples {
 		t.Run(s.Name, func(t *testing.T) {
+			doc, err := headless.Open(s.Data, headless.Limits{})
+			if err != nil {
+				t.Fatalf("headless.Open(%s): %v", s.Name, err)
+			}
+			if doc.Version() != "1.4" {
+				t.Errorf("%s: Version() = %q, want 1.4", s.Name, doc.Version())
+			}
+			info := doc.Info()
+			if info.Title == "" || info.Author == "" || info.Creator != "ntpdf/examples" || info.CreationDate != "2026-10-19 00:00:00 UTC" {
+				t.Errorf("%s: unexpected Info() = %+v", s.Name, info)
+			}
+			txt, err := doc.PageText(1)
+			if err != nil || strings.TrimSpace(txt) == "" {
+				t.Errorf("%s: PageText(1) = %q, %v", s.Name, txt, err)
+			}
+
 			m := ntpdf.NewWithConfig(ntpdf.Config{
 				Cols:        80,
 				Rows:        24,

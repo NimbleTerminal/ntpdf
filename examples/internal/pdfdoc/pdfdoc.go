@@ -47,7 +47,10 @@ type Page struct {
 
 // Builder constructs a multi-page PDF 1.4 document in memory.
 type Builder struct {
-	pages []*Page
+	Title   string
+	Author  string
+	Subject string
+	pages   []*Page
 }
 
 // New creates an empty PDF document builder.
@@ -192,7 +195,12 @@ func (b *Builder) Bytes() []byte {
 	// For each page i (0..N-1):
 	//   pageObj = 7 + i*2
 	//   contentObj = 8 + i*2
+	// Optional trailing Info object if Title/Author/Subject is set.
+	hasInfo := b.Title != "" || b.Author != "" || b.Subject != ""
 	totalObjs := 6 + len(b.pages)*2
+	if hasInfo {
+		totalObjs++
+	}
 	offsets := make([]int, totalObjs+1)
 
 	writeObj := func(id int, body string) {
@@ -244,13 +252,23 @@ func (b *Builder) Bytes() []byte {
 		out.WriteString("endstream\nendobj\n")
 	}
 
+	trailerInfo := ""
+	if hasInfo {
+		infoID := totalObjs
+		writeObj(infoID, fmt.Sprintf(
+			"<< /Title (%s) /Author (%s) /Subject (%s) /Creator (ntpdf/examples) /CreationDate (D:20261019000000Z) >>",
+			escapePDFString(b.Title), escapePDFString(b.Author), escapePDFString(b.Subject),
+		))
+		trailerInfo = fmt.Sprintf(" /Info %d 0 R", infoID)
+	}
+
 	xrefOffset := out.Len()
 	fmt.Fprintf(&out, "xref\n0 %d\n0000000000 65535 f \n", totalObjs+1)
 	for id := 1; id <= totalObjs; id++ {
 		fmt.Fprintf(&out, "%010d 00000 n \n", offsets[id])
 	}
-	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n",
-		totalObjs+1, xrefOffset)
+	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R%s >>\nstartxref\n%d\n%%%%EOF\n",
+		totalObjs+1, trailerInfo, xrefOffset)
 	return out.Bytes()
 }
 

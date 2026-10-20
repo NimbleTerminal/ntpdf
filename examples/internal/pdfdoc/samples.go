@@ -108,6 +108,9 @@ func GallerySamples(examplePDF []byte) []Sample {
 // BuildArchitectureDeck generates a 3-page 16:9 widescreen presentation PDF (720x405 pts).
 func BuildArchitectureDeck() []byte {
 	b := New()
+	b.Title = "Terminal PDF Architecture"
+	b.Author = "NimbleTerminal"
+	b.Subject = "Architecture Deck"
 	th := Themes[0] // midnight
 
 	// Slide 1: Architecture Pipeline
@@ -225,6 +228,9 @@ func BuildArchitectureDeck() []byte {
 // BuildTelemetrySpec generates a 2-page US Letter engineering specification PDF (612x792 pts).
 func BuildTelemetrySpec() []byte {
 	b := New()
+	b.Title = "RFC-2026: Terminal Document Streaming"
+	b.Author = "NimbleTerminal"
+	b.Subject = "Standards Track Specification"
 	th := Themes[1] // paper
 
 	p1 := b.AddPage(612, 792)
@@ -312,6 +318,9 @@ func BuildTelemetrySpec() []byte {
 // BuildCloudInvoice generates a 2-page financial statement and usage report PDF (612x792 pts).
 func BuildCloudInvoice() []byte {
 	b := New()
+	b.Title = "Nimble Markets Cloud Invoice #INV-2026-04"
+	b.Author = "Nimble Markets Billing"
+	b.Subject = "Quarterly Statement"
 	th := Themes[1] // paper
 
 	p1 := b.AddPage(612, 792)
@@ -401,6 +410,9 @@ func BuildReport(lineMode bool, datasetIdx, themeIdx, variant int) (string, []by
 	d := ReportDatasets[((datasetIdx%len(ReportDatasets))+len(ReportDatasets))%len(ReportDatasets)]
 	th := Themes[((themeIdx%len(Themes))+len(Themes))%len(Themes)]
 	b := New()
+	b.Title = d.Title
+	b.Author = "NimbleTerminal Report Builder"
+	b.Subject = d.Subtitle
 
 	palette := []RGB{th.C1, th.C2, th.C3, th.C4}
 	series := make([]Series, len(d.Series))
@@ -504,6 +516,9 @@ func BuildReport(lineMode bool, datasetIdx, themeIdx, variant int) (string, []by
 // 612x792, Page 3: 1:1 Square 520x520) for the pagedims aspect-matching demo.
 func BuildAspectSample() []byte {
 	b := New()
+	b.Title = "Multi-Aspect Viewport Calibration"
+	b.Author = "NimbleTerminal"
+	b.Subject = "Viewport Calibration"
 	th := Themes[0] // midnight
 
 	specs := []struct {

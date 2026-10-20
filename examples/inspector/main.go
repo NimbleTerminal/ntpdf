@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -14,17 +16,20 @@ import (
 	"nimbleterminal.dev/ntpdf"
 	"nimbleterminal.dev/ntpdf/examples/internal/demohelp"
 	"nimbleterminal.dev/ntpdf/examples/internal/pdfdoc"
+	headless "nimbleterminal.dev/ntpdf/pdfdoc"
 )
 
 var (
 	boxStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8de3b6"))
 	labelStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#4ea8de"))
+	metaStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#8de3b6"))
 	footerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
 )
 
 type model struct {
 	pv            ntpdf.Model
+	doc           *headless.Document
 	samples       []pdfdoc.Sample
 	docIdx        int
 	width, height int
@@ -43,8 +48,10 @@ func newModel() model {
 		cfg.RenderDPI = 120
 		cfg.PictureConfig.KittyMedium = picture.KittyMediumSharedMemory
 	}
+	doc, _ := headless.Open(samples[0].Data, headless.Limits{})
 	return model{
 		pv:      ntpdf.NewWithConfig(cfg),
+		doc:     doc,
 		samples: samples,
 	}
 }
@@ -97,6 +104,7 @@ func (m *model) selectDoc(idx int) tea.Cmd {
 	n := len(m.samples)
 	m.docIdx = ((idx % n) + n) % n
 	s := m.samples[m.docIdx]
+	m.doc, _ = headless.Open(s.Data, headless.Limits{})
 	return m.pv.SetPDFData(s.Name, s.Data)
 }
 
@@ -130,7 +138,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) telemetryLine(width int) string {
+func (m model) telemetryBlock(width int) (string, int) {
 	page := m.pv.Page()
 	wPts, hPts, _ := m.pv.PagePointSize(page)
 	pxW, pxH, hasPx := m.pv.PageDimensions(page)
@@ -143,9 +151,23 @@ func (m model) telemetryLine(width int) string {
 	if hasPx {
 		pxInfo = fmt.Sprintf("%dx%dpx", pxW, pxH)
 	}
-	info := fmt.Sprintf("Media:%.0fx%.0fpt  Bitmap:%s  Target:%dx%dpx (%dx%dc)  Proto:%s  Images:%d",
-		wPts, hPts, pxInfo, rg.Pixels.X, rg.Pixels.Y, rg.Cells.X, rg.Cells.Y, proto, m.pv.PageImageCount(page))
-	return labelStyle.Width(width).MaxWidth(width).Render(info)
+	line1 := labelStyle.Width(width).MaxWidth(width).Render(fmt.Sprintf(
+		"Media:%.0fx%.0fpt  Bitmap:%s  Target:%dx%dpx (%dx%dc)  Proto:%s  Images:%d",
+		wPts, hPts, pxInfo, rg.Pixels.X, rg.Pixels.Y, rg.Cells.X, rg.Cells.Y, proto, m.pv.PageImageCount(page),
+	))
+	if m.doc == nil {
+		return line1, 1
+	}
+	info := m.doc.Info()
+	chars := 0
+	if txt, err := m.doc.PageText(page); err == nil {
+		chars = utf8.RuneCountInString(strings.TrimSpace(txt))
+	}
+	line2 := metaStyle.Width(width).MaxWidth(width).Render(fmt.Sprintf(
+		"pdfdoc: PDF %s  Title:%q  Author:%s  Chars:%d",
+		m.doc.Version(), ntpdf.SanitizeForTerminal(info.Title), ntpdf.SanitizeForTerminal(info.Author), chars,
+	))
+	return lipgloss.JoinVertical(lipgloss.Left, line1, line2), 2
 }
 
 func (m model) View() tea.View {
@@ -154,13 +176,13 @@ func (m model) View() tea.View {
 	}
 	_, rightW, innerH := m.paneDims()
 	header := headerStyle.Render("SIDE-BY-SIDE PDF INSPECTOR") + "  " +
-		footerStyle.Render("Left: ImageMode · Right: TextMode + Telemetry · d: doc · n/p: page · f: fit · +/-: zoom · q: quit")
+		footerStyle.Render("Left: ImageMode · Right: TextMode + pdfdoc Telemetry · d: doc · n/p: page · f: fit · +/-: zoom · q: quit")
 
 	leftPane := boxStyle.Render(m.pv.View().Content)
 
-	textH := max(1, innerH-1)
+	telemetry, teleH := m.telemetryBlock(rightW)
+	textH := max(1, innerH-teleH)
 	textContent := m.pv.TextView(rightW, textH)
-	telemetry := m.telemetryLine(rightW)
 	rightPane := boxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, textContent, telemetry))
 
 	panes := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
