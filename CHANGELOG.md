@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v0.6.1 (2026-10-28)
+
+- Update PDFium to v1.21.4, ntpicture to v0.1.3, ntshim to v0.6.1, Bubble Tea to v2.1.1, and go-booba to v0.10.7.
+- Refresh the PDF parser and indirect dependencies across the library and examples.
+
 ## v0.5.1 (2026-10-20)
 
 - Treat uncompressed in-use cross-reference entries at offset `0` (`0000000000 00000 n`, emitted by Quartz PDFContext and other writers for missing objects) as free in `pdfdoc` preflight unless referenced as an indirect integer by stream/predictor preflight, while continuing to reject any non-zero offset that does not land on a validated `N G obj` boundary.

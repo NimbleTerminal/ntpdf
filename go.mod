@@ -13,7 +13,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/tetratelabs/wazero v1.12.0
 	nimbleterminal.dev/ntpicture v0.1.3
-	nimbleterminal.dev/ntshim v0.6.0
+	nimbleterminal.dev/ntshim v0.6.1
 )
 
 require (

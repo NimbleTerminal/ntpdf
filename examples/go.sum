@@ -119,3 +119,5 @@ nimbleterminal.dev/ntpicture v0.1.3 h1:R2HJDMRnUs29rXXYzGsZFaFPDDTlvdSxmm5DM4Ym+
 nimbleterminal.dev/ntpicture v0.1.3/go.mod h1:mwbOLl1CRKaPDXmsiv/GLfeSwIpTqCt9FzdI6L/VnIY=
 nimbleterminal.dev/ntshim v0.6.0 h1:0m7g3laU1cxwVZLz+yY/c2acHuyQKrd3Bi9cvVS6w3c=
 nimbleterminal.dev/ntshim v0.6.0/go.mod h1:df+RVCGgRjaMTM+IfmTHHe4Fd6yy1njO97P3vYc8yxE=
+nimbleterminal.dev/ntshim v0.6.1 h1:GYAop8H4nvIE2TJY1uberJuVRtyiqu+GD3pXdZtIGpk=
+nimbleterminal.dev/ntshim v0.6.1/go.mod h1:YGqe4ToSJoMe1aa8yFsR9vvc5Qdycjok2/pUg79q3/Q=
