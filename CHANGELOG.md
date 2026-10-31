@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v0.5.3 (2026-10-30)
+
+- Update ntpicture to v0.1.4 and terminfo to v1.3.0 across the library and examples.
+- Remove unused indirect dependencies and tidy module checksums.
+
 ## v0.5.2 (2026-10-28)
 
 - Update PDFium to v1.21.4, ntpicture to v0.1.3, ntshim to v0.6.1, Bubble Tea to v2.1.1, and go-booba to v0.10.7.
