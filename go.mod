@@ -19,6 +19,8 @@ require (
 
 replace nimbleterminal.dev/ntmediabox => ../ntmediabox
 
+replace nimbleterminal.dev/ntmediabox/pkg/mediabox => ../ntmediabox/pkg/mediabox
+
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
@@ -44,4 +46,5 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
+	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.0.0 // indirect
 )
