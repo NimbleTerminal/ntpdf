@@ -12,9 +12,12 @@ require (
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/tetratelabs/wazero v1.12.0
+	nimbleterminal.dev/ntmediabox v0.0.0
 	nimbleterminal.dev/ntpicture v0.1.4
 	nimbleterminal.dev/ntshim v0.6.1
 )
+
+replace nimbleterminal.dev/ntmediabox => ../ntmediabox
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
