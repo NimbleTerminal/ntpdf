@@ -46,5 +46,5 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
-	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.0.0 // indirect
+	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.1.0 // indirect
 )
