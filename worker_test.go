@@ -107,9 +107,9 @@ func TestWorkerRendererSandboxedSubprocess(t *testing.T) {
 		AllowUnsandboxed: !sup.Available,
 	}
 	if runtime.GOOS == "linux" {
-		// On Linux in tests, if ntmediabox-stage isn't built beside test binary, use in-memory pipe or stage if pure Go.
-		if _, err := ntmediabox.ResolveSibling("ntmediabox-stage"); err != nil {
-			t.Skip("ntmediabox-stage not beside test binary on Linux")
+		// On Linux in tests, if ntconfine-stage isn't built beside test binary, use in-memory pipe or stage if pure Go.
+		if _, err := ntmediabox.ResolveSibling(ntmediabox.DefaultStageBinary); err != nil {
+			t.Skip("ntconfine-stage not beside test binary on Linux")
 		}
 	}
 	factory := WorkerRendererFactory(cfg)

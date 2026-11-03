@@ -22,7 +22,7 @@ type WorkerConfig struct {
 	// WorkerArgs are arguments passed to WorkerPath to enter ServeWorker mode.
 	WorkerArgs []string
 	// StagePath is the Linux Landlock + seccomp stage binary. When empty on Linux,
-	// WorkerRendererFactory checks for "ntmediabox-stage" beside os.Executable() and
+	// WorkerRendererFactory checks for "ntconfine-stage" beside os.Executable() and
 	// falls back to WorkerPath when StageArgs is non-empty.
 	StagePath string
 	// StageArgs are optional prefix arguments passed to StagePath before
@@ -125,7 +125,7 @@ func defaultStartPDFWorker(cfg WorkerConfig) (io.ReadWriteCloser, func() error, 
 	stagePath := cfg.StagePath
 	stageArgs := slices.Clone(cfg.StageArgs)
 	if runtime.GOOS == "linux" && stagePath == "" {
-		if sib, sibErr := ntmediabox.ResolveSibling("ntmediabox-stage"); sibErr == nil {
+		if sib, sibErr := ntmediabox.ResolveSibling(ntmediabox.DefaultStageBinary); sibErr == nil {
 			stagePath = sib
 		} else if len(stageArgs) > 0 {
 			stagePath = resolvedWorker
