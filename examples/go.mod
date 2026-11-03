@@ -6,7 +6,7 @@ require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/NimbleMarkets/go-booba v0.10.7
+	github.com/NimbleMarkets/go-booba v0.11.0
 	nimbleterminal.dev/ntpdf v0.5.3
 	nimbleterminal.dev/ntpicture v0.1.4
 )
