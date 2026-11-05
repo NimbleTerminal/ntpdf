@@ -73,13 +73,13 @@ task build-examples
 ./bin/ntpdf-pdfview path/to/your.pdf
 ```
 
-All five examples also compile to WebAssembly and run in the browser via [`booba`](https://github.com/NimbleMarkets/go-booba), publishing their key bindings as interactive action buttons above the terminal:
+All five examples also compile to WebAssembly and run in the browser via [`booba`](https://github.com/nimbleterminal/booba), publishing their key bindings as interactive action buttons above the terminal:
 
 ```sh
 task serve-wasm-site   # builds web/demos/*.wasm, stages booba + pdfium assets, serves http://localhost:8000/web/
 ```
 
-The browser demos use booba v0.10.3 and request `ntpicture`'s Kitty shared-memory transport, passing raw RGBA frames without PNG encoding or base64 image payloads, and falling back to direct PNG when the browser bridge is unavailable. Call `Model.Dispose()` (returning the terminal placement cleanup `tea.Cmd`) or `Model.Close()` when disposing the widget.
+The browser demos use booba v0.12.1 and request `ntpicture`'s Kitty shared-memory transport, passing raw RGBA frames without PNG encoding or base64 image payloads, and falling back to direct PNG when the browser bridge is unavailable. Call `Model.Dispose()` (returning the terminal placement cleanup `tea.Cmd`) or `Model.Close()` when disposing the widget.
 
 ## Modes
 

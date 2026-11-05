@@ -12,14 +12,10 @@ require (
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/tetratelabs/wazero v1.12.0
-	nimbleterminal.dev/ntmediabox v0.0.0
-	nimbleterminal.dev/ntpicture v0.1.4
+	nimbleterminal.dev/ntmediabox v0.1.0
+	nimbleterminal.dev/ntpicture v0.1.5
 	nimbleterminal.dev/ntshim v0.6.1
 )
-
-replace nimbleterminal.dev/ntmediabox => ../ntmediabox
-
-replace nimbleterminal.dev/ntmediabox/pkg/mediabox => ../ntmediabox/pkg/mediabox
 
 require (
 	github.com/Masterminds/semver/v3 v3.5.0 // indirect
@@ -39,18 +35,14 @@ require (
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/xo/terminfo v1.3.0 // indirect
+	github.com/xo/terminfo v1.3.1 // indirect
 	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
-	nimbleterminal.dev/ntconfine v0.1.0 // indirect
+	nimbleterminal.dev/ntconfine v0.1.1 // indirect
 	nimbleterminal.dev/ntconfine/pkg/confine v0.1.0 // indirect
 	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.1.0 // indirect
 )
-
-replace nimbleterminal.dev/ntconfine => ../ntconfine
-
-replace nimbleterminal.dev/ntconfine/pkg/confine => ../ntconfine/pkg/confine

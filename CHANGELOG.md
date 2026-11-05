@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## Unreleased
+
+- Migrate Booba imports and the asset tool to `nimbleterminal.dev/booba` v0.12.1 and update browser runtime assets to ntwebterm.
+- Update ntpicture to v0.1.5 and terminfo to v1.3.1, use published ntmediabox v0.1.0 and ntconfine v0.1.1 modules, and refresh the browser Bubble Tea fork.
+
 ## v0.5.3 (2026-10-30)
 
 - Update ntpicture to v0.1.4 and terminfo to v1.3.0 across the library and examples.

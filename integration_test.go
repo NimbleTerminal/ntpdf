@@ -22,6 +22,7 @@ func drainLoad(t *testing.T, m Model, cmd tea.Cmd) Model {
 	}
 	msg := cmd()
 	m, _ = m.Update(msg)
+	t.Cleanup(func() { m.Close() })
 	return m
 }
 

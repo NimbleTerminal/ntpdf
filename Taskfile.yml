@@ -156,7 +156,7 @@ tasks:
   clean-wasm-site:
     desc: 'Remove generated WASM demo site artifacts'
     cmds:
-      - rm -rf web/demos web/booba web/ghostty-web web/ntshim
+      - rm -rf web/demos web/booba web/ntwebterm web/ghostty-web web/ntshim
       - rm -f web/wasm_exec.js web/app.wasm web/LICENSE
 
 ###############################################################################

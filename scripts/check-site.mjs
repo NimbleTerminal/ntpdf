@@ -6,7 +6,7 @@ const demos = ['gallery', 'report', 'inspector', 'pagedims', 'pdfview'];
 
 for (const file of [
   'index.html', 'site.css', 'site.js', 'wasm_exec.js', 'booba/booba.js',
-  'ghostty-web/ghostty-web.js', 'ghostty-web/ghostty-vt.wasm',
+  'ntwebterm/ntwebterm.js', 'ntwebterm/ghostty-vt.wasm',
   'ntshim/pdfium/pdfium-shim.js',
   'LICENSE',
 ]) await access(`web/${file}`);
