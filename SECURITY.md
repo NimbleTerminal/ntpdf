@@ -176,3 +176,35 @@ Run native tests with the race detector, integration tests, vet, native and WASM
 builds/tests, and the browser demo smoke checks. Sandboxed subprocess tests may
 skip when the host cannot enforce confinement; such a skip is not validation of
 that platform's sandbox.
+
+### Fuzzing
+
+`go test ./...` runs the seed corpus. To fuzz every target separately:
+
+```sh
+task fuzz                                  # 10 seconds per target, 2 workers
+task fuzz FUZZTIME=60s FUZZPARALLEL=4        # duration and parallelism per target
+```
+
+| Target | Invariant or boundary |
+| --- | --- |
+| `FuzzDecodeWorkerPages` | Accepted metadata respects geometry, text, page/run counts, and configured image/page limits |
+| `FuzzSanitizeForTerminal` | Output is valid printable UTF-8 and sanitization is idempotent |
+| `FuzzLayoutRuns` | Host viewport dimensions bound the grid; hostile text and coordinates cannot emit control characters or panic layout |
+| `FuzzCheckedWorkerImage` | Image budgets agree with an arbitrary-precision bounds oracle; rejected images never reach pixel conversion |
+| `FuzzPDFStreamPreflight` | Arbitrary input exercises raw preflight without panic recovery hiding crashes |
+| `FuzzPDFStructuredPreflight` | Rebuilt stream lengths, xref offsets, and compression let mutations reach object streams, xref records, and filter chains |
+| `FuzzPDFXrefBoundaries` | Redirecting a live xref entry into an accepted document's string, comment, or stream is rejected |
+
+For one longer campaign, select an exact target:
+
+```sh
+go test ./pdfdoc -run='^$' -fuzz='^FuzzPDFStructuredPreflight$' -fuzztime=5m -parallel=4
+```
+
+The preflight targets cap input, decoded bytes, image pixels, and cooperative
+work time. They do not invoke the downstream PDF reader or PDFium. Fuzzing full
+PDF parsing requires separate killable subprocess supervision; a cooperative
+preflight deadline cannot contain every downstream parser hang or allocation.
+Keep regression inputs from real failures; Go writes minimized failing inputs
+under the affected package's `testdata/fuzz/<target>/` directory.

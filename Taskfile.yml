@@ -41,6 +41,17 @@ tasks:
       - go test ./...
       - go -C examples test ./...
 
+  fuzz:
+    desc: 'Fuzz each security target (FUZZTIME per target; FUZZPARALLEL workers)'
+    vars:
+      FUZZTIME: '{{.FUZZTIME | default "10s"}}'
+      FUZZPARALLEL: '{{.FUZZPARALLEL | default "2"}}'
+    cmds:
+      - for: [FuzzDecodeWorkerPages, FuzzSanitizeForTerminal, FuzzLayoutRuns, FuzzCheckedWorkerImage]
+        cmd: go test . -run='^$' -fuzz='^{{.ITEM}}$' -fuzztime='{{.FUZZTIME}}' -parallel='{{.FUZZPARALLEL}}'
+      - for: [FuzzPDFStreamPreflight, FuzzPDFStructuredPreflight, FuzzPDFXrefBoundaries]
+        cmd: go test ./pdfdoc -run='^$' -fuzz='^{{.ITEM}}$' -fuzztime='{{.FUZZTIME}}' -parallel='{{.FUZZPARALLEL}}'
+
   test-integration:
     desc: 'Run integration tests including PDFium rendering'
     cmds:

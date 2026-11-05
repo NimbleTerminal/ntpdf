@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add security fuzz targets for terminal text, layout geometry, image budgets, and structured PDF/xref mutations; strengthen worker metadata assertions and expose raw preflight panics to fuzzing. Run all seven targets with `task fuzz`.
+- Reject reversed worker image bounds before coordinate subtraction can overflow.
+
 - Confine PDF preflight, text extraction, and page metadata alongside rasterization in ntmediabox workers; fail confined loads without host parsing fallback.
 - Add bounded worker RPC deadlines (both host-side and worker-side), single-pass worker preflight without duplicate page retention, interruptible disposal of in-flight worker loads, validated metadata budgets, and session image/DPI checks before RGBA conversion.
 - Harden `pdfdoc` preflight to require `%PDF-` at byte 0, verify indirect stream/predictor integers against active `xref` entries, and bound Form XObject DAG traversal in `PageImages`.

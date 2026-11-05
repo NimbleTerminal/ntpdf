@@ -236,7 +236,13 @@ func checkedWorkerImage(img image.Image, req ntmediabox.RenderRequest, limits Li
 	if img == nil {
 		return nil, errors.New("empty rendered PDF page")
 	}
-	w, h := img.Bounds().Dx(), img.Bounds().Dy()
+	bounds := img.Bounds()
+	// Reject reversed bounds before subtraction: an overflowing negative span
+	// can otherwise wrap into a small positive width or height.
+	if bounds.Max.X <= bounds.Min.X || bounds.Max.Y <= bounds.Min.Y {
+		return nil, errors.New("invalid rendered PDF bounds")
+	}
+	w, h := bounds.Dx(), bounds.Dy()
 	maxW, maxH, maxPixels := ntmediabox.MaxRenderSide, ntmediabox.MaxRenderSide, ntmediabox.MaxRenderPixels
 	if req.Width > 0 {
 		maxW = min(maxW, req.Width)

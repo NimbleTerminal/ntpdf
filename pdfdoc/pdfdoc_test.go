@@ -200,7 +200,8 @@ func FuzzPDFStreamPreflight(f *testing.F) {
 		if len(data) > 1<<20 {
 			t.Skip()
 		}
-		_ = checkPDFStreams(data, Limits{})
+		// Exercise the raw parser so its public panic recovery cannot mask a crash.
+		_ = checkPDFStreamSyntax(data, Limits{MaxStreamBytes: 64 << 10, MaxInflatedBytes: 256 << 10, MaxImagePixels: 4096, Timeout: time.Second})
 	})
 }
 
@@ -719,4 +720,3 @@ func TestPageImagesBoundsFormXObjectDAG(t *testing.T) {
 		t.Fatalf("PageImages took %v on Form XObject DAG; expected bounded execution", elapsed)
 	}
 }
-

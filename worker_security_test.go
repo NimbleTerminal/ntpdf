@@ -8,12 +8,14 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"math"
 	"net"
 	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 	"nimbleterminal.dev/ntmediabox"
@@ -233,12 +235,45 @@ func TestPDFReadEnforcesByteBudget(t *testing.T) {
 }
 
 func FuzzDecodeWorkerPages(f *testing.F) {
-	f.Add([]byte(`{"version":1,"pages":[{"box":[0,0,612,792]}]}`))
-	f.Add([]byte(`{"version":99,"pages":null}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		pages, err := decodeWorkerPages(data, Limits{MaxPages: 10, MaxImagesPerPage: 4})
-		if err == nil && (len(pages) == 0 || len(pages) > 10) {
+	f.Add([]byte(`{"version":1,"pages":[{"box":[0,0,612,792],"images":1,"runs":[{"Font":"Sans","FontSize":12,"X":50,"Y":700,"W":60,"S":"text\u001b\u202e"}]}]}`), uint8(10), uint16(4))
+	f.Add([]byte(`{"version":99,"pages":null}`), uint8(0), uint16(0))
+	f.Add([]byte(`{"version":1,"PAGES":[{"box":[0,0,1,1],"runſ":[null]}]}`), uint8(1), uint16(1))
+	f.Fuzz(func(t *testing.T, data []byte, pageCap uint8, imageCap uint16) {
+		limits := Limits{MaxPages: int(pageCap) - 1, MaxImagesPerPage: int(imageCap) - 1}
+		pages, err := decodeWorkerPages(data, limits)
+		if err != nil {
+			return
+		}
+		maxPages, maxImages := maxWorkerPages, maxWorkerImagesPerPage
+		if limits.MaxPages > 0 {
+			maxPages = min(maxPages, limits.MaxPages)
+		}
+		if limits.MaxImagesPerPage > 0 {
+			maxImages = min(maxImages, limits.MaxImagesPerPage)
+		}
+		if len(pages) == 0 || len(pages) > maxPages {
 			t.Fatalf("invalid decoded page count %d", len(pages))
+		}
+		finite := func(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) && math.Abs(v) <= 1e9 }
+		runs := 0
+		for _, p := range pages {
+			for _, v := range []float64{p.media.x0, p.media.y0, p.media.x1, p.media.y1} {
+				if !finite(v) {
+					t.Fatal("invalid page coordinate")
+				}
+			}
+			if p.media.width() <= 0 || p.media.height() <= 0 || p.imageCount < 0 || p.imageCount > maxImages {
+				t.Fatal("invalid page geometry or image count")
+			}
+			runs += len(p.runs)
+			for _, r := range p.runs {
+				if !finite(r.X) || !finite(r.Y) || !finite(r.W) || !finite(r.FontSize) || len(r.Font) > 4096 || len(r.S) > 64<<10 || !utf8.ValidString(r.Font) || !utf8.ValidString(r.S) {
+					t.Fatal("invalid accepted text run")
+				}
+			}
+		}
+		if runs > maxWorkerRuns {
+			t.Fatal("accepted excessive text runs")
 		}
 	})
 }
