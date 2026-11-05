@@ -121,40 +121,44 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 		if err != nil {
 			return nil, err
 		}
-		pdfiumOnce.Do(func() {
-			pdfiumPool, pdfiumErr = webassembly.Init(pdfiumPoolConfig())
-		})
-		if pdfiumErr != nil {
-			return nil, fmt.Errorf("pdfium pool init: %w", pdfiumErr)
-		}
-		if pdfiumPool == nil {
-			return nil, errors.New("pdfium pool not initialised")
-		}
-		if len(data) == 0 {
-			return nil, fmt.Errorf("pdfium OpenDocument %q: empty data", name)
-		}
-
-		inst, err := pdfiumPool.GetInstance(30 * time.Second)
-		if err != nil {
-			return nil, fmt.Errorf("pdfium GetInstance: %w", err)
-		}
-		doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
-		if err != nil {
-			_ = inst.Close()
-			return nil, fmt.Errorf("pdfium OpenDocument %q: %w", name, err)
-		}
-		r := &pdfiumRenderer{
-			pages:           pages,
-			instance:        inst,
-			docRef:          doc.Document,
-			maxRenderPixels: limits.MaxRenderPixels,
-		}
-		r.cleanupHandle = runtime.AddCleanup(r, cleanUpPdfium, pdfiumCleanupArgs{
-			instance: inst,
-			docRef:   doc.Document,
-		})
-		return r, nil
+		return openRendererWithPages(name, data, pages, limits)
 	}
+}
+
+func openRendererWithPages(name string, data []byte, pages []pdfPage, limits Limits) (Renderer, error) {
+	pdfiumOnce.Do(func() {
+		pdfiumPool, pdfiumErr = webassembly.Init(pdfiumPoolConfig())
+	})
+	if pdfiumErr != nil {
+		return nil, fmt.Errorf("pdfium pool init: %w", pdfiumErr)
+	}
+	if pdfiumPool == nil {
+		return nil, errors.New("pdfium pool not initialised")
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("pdfium OpenDocument %q: empty data", name)
+	}
+
+	inst, err := pdfiumPool.GetInstance(30 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("pdfium GetInstance: %w", err)
+	}
+	doc, err := inst.OpenDocument(&requests.OpenDocument{File: &data})
+	if err != nil {
+		_ = inst.Close()
+		return nil, fmt.Errorf("pdfium OpenDocument %q: %w", name, err)
+	}
+	r := &pdfiumRenderer{
+		pages:           pages,
+		instance:        inst,
+		docRef:          doc.Document,
+		maxRenderPixels: limits.MaxRenderPixels,
+	}
+	r.cleanupHandle = runtime.AddCleanup(r, cleanUpPdfium, pdfiumCleanupArgs{
+		instance: inst,
+		docRef:   doc.Document,
+	})
+	return r, nil
 }
 
 type pdfiumCleanupArgs struct {
@@ -293,7 +297,7 @@ func (r *pdfiumRenderer) clampDPIToBudget(pageNum, dpi int) int {
 		Document: r.docRef,
 		Index:    pageNum - 1,
 	})
-	if err != nil || sz.Width <= 0 || sz.Height <= 0 {
+	if err != nil || sz.Width <= 0 || sz.Height <= 0 || math.IsNaN(sz.Width) || math.IsNaN(sz.Height) || math.IsInf(sz.Width, 0) || math.IsInf(sz.Height, 0) {
 		return dpi
 	}
 	wIn := sz.Width / 72.0
@@ -304,6 +308,9 @@ func (r *pdfiumRenderer) clampDPIToBudget(pageNum, dpi int) int {
 	}
 	// max DPI satisfying wIn * hIn * DPI² <= budget
 	maxDPI := math.Sqrt(float64(r.maxRenderPixels) / (wIn * hIn))
+	if math.IsNaN(maxDPI) || math.IsInf(maxDPI, 0) || maxDPI > float64(dpi) {
+		return dpi
+	}
 	if maxDPI < 1 {
 		maxDPI = 1
 	}

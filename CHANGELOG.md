@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Confine PDF preflight, text extraction, and page metadata alongside rasterization in ntmediabox workers; fail confined loads without host parsing fallback.
-- Add bounded worker RPC deadlines, interruptible disposal, validated metadata budgets, and session image/DPI checks before RGBA conversion.
-- Bound host file reads even when files grow after stat, and document loading paths and confinement limits in `SECURITY.md`.
+- Add bounded worker RPC deadlines (both host-side and worker-side), single-pass worker preflight without duplicate page retention, interruptible disposal of in-flight worker loads, validated metadata budgets, and session image/DPI checks before RGBA conversion.
+- Harden `pdfdoc` preflight to require `%PDF-` at byte 0, verify indirect stream/predictor integers against active `xref` entries, and bound Form XObject DAG traversal in `PageImages`.
+- Bound host file reads even when files grow after stat, reject oversized `InitialData`/`SetPDFData` buffers before copying, sanitize terminal filenames in examples, and document loading paths and confinement limits in `SECURITY.md`.
 
 - Migrate Booba imports and the asset tool to `nimbleterminal.dev/booba` v0.12.1 and update browser runtime assets to ntwebterm.
 - Update ntpicture to v0.1.5 and terminfo to v1.3.1, use published ntmediabox v0.1.0 and ntconfine v0.1.1 modules, and refresh the browser Bubble Tea fork.

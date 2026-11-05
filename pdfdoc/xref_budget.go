@@ -37,11 +37,18 @@ func (b *pdfStreamBudget) checkReferences() error {
 			return fmt.Errorf("PDF indirect integer does not match validated object (object %d)", ref.id)
 		}
 	}
+	var inUse map[pdfRef]bool
+	if b.lastStartXref >= 0 && len(b.usedIntegers) > 0 {
+		inUse = make(map[pdfRef]bool, len(b.references))
+	}
 	for _, x := range b.references {
 		if x.compressed {
 			ids := b.objectStreams[x.offset]
 			if x.index < 0 || x.index >= int64(len(ids)) || ids[x.index] != x.ref.id {
 				return fmt.Errorf("PDF xref points outside validated object stream (object %d in stream %d at index %d)", x.ref.id, x.offset, x.index)
+			}
+			if inUse != nil {
+				inUse[x.ref] = true
 			}
 		} else if x.offset == 0 {
 			if b.usedIntegers[x.ref] {
@@ -49,6 +56,15 @@ func (b *pdfStreamBudget) checkReferences() error {
 			}
 		} else if ref, ok := b.objects[x.offset]; !ok || ref != x.ref {
 			return fmt.Errorf("PDF xref points outside validated object boundaries (object %d at offset %d)", x.ref.id, x.offset)
+		} else if inUse != nil {
+			inUse[x.ref] = true
+		}
+	}
+	if inUse != nil {
+		for ref := range b.usedIntegers {
+			if !inUse[ref] {
+				return fmt.Errorf("PDF indirect integer is not in cross-reference table (object %d)", ref.id)
+			}
 		}
 	}
 	return nil

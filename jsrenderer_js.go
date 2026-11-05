@@ -54,15 +54,19 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 		if err != nil {
 			return nil, err
 		}
-		if len(data) == 0 {
-			return nil, fmt.Errorf("empty PDF data for %q", name)
-		}
-		doc, err := pdfium.Load(context.Background(), data)
-		if err != nil {
-			return nil, fmt.Errorf("ntshim/pdfium load %q: %w", name, err)
-		}
-		return &jsRenderer{doc: doc, maxRenderPixels: limits.MaxRenderPixels, pages: pages}, nil
+		return openRendererWithPages(name, data, pages, limits)
 	}
+}
+
+func openRendererWithPages(name string, data []byte, pages []pdfPage, limits Limits) (Renderer, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty PDF data for %q", name)
+	}
+	doc, err := pdfium.Load(context.Background(), data)
+	if err != nil {
+		return nil, fmt.Errorf("ntshim/pdfium load %q: %w", name, err)
+	}
+	return &jsRenderer{doc: doc, maxRenderPixels: limits.MaxRenderPixels, pages: pages}, nil
 }
 
 // RenderPage rasterizes a 1-indexed page. MaxRenderPixels enforcement:
@@ -150,7 +154,7 @@ func (r *jsRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int) (i
 // mirroring native behavior.
 func (r *jsRenderer) clampDPIToBudget(pageNum, dpi int) int {
 	wPt, hPt, err := r.doc.PageSize(pageNum - 1)
-	if err != nil || wPt <= 0 || hPt <= 0 {
+	if err != nil || wPt <= 0 || hPt <= 0 || math.IsNaN(wPt) || math.IsNaN(hPt) || math.IsInf(wPt, 0) || math.IsInf(hPt, 0) {
 		return dpi
 	}
 	wIn := wPt / 72.0
@@ -160,6 +164,9 @@ func (r *jsRenderer) clampDPIToBudget(pageNum, dpi int) int {
 		return dpi
 	}
 	maxDPI := math.Sqrt(float64(r.maxRenderPixels) / (wIn * hIn))
+	if math.IsNaN(maxDPI) || math.IsInf(maxDPI, 0) || maxDPI > float64(dpi) {
+		return dpi
+	}
 	if maxDPI < 1 {
 		maxDPI = 1
 	}

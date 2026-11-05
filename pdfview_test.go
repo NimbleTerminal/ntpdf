@@ -1134,3 +1134,24 @@ func TestAutoRenderModeAndPictureAccessors(t *testing.T) {
 	_ = m.Stop()
 	_ = m.KeepOnMainScreen()
 }
+
+func TestOversizeInitialDataAndSetPDFDataRejected(t *testing.T) {
+	m := NewWithConfig(Config{
+		Cols:        80,
+		Rows:        24,
+		InitialName: "oversize-init.pdf",
+		InitialData: []byte("12345"),
+		Limits:      Limits{MaxFileBytes: 4},
+	})
+	defer m.Close()
+	errMsg := drainBatchUntilLoad(t, m.Init())
+	if !strings.Contains(errMsg.err.Error(), "MaxFileBytes=4") {
+		t.Fatalf("Init oversize error = %v, want MaxFileBytes=4", errMsg.err)
+	}
+
+	cmd := m.SetPDFData("oversize-set.pdf", []byte("123456"))
+	msg, ok := cmd().(pdfErrMsg)
+	if !ok || !strings.Contains(msg.err.Error(), "MaxFileBytes=4") {
+		t.Fatalf("SetPDFData oversize msg = %#v, want pdfErrMsg with MaxFileBytes=4", msg)
+	}
+}

@@ -63,6 +63,12 @@ type workerRenderer struct {
 // extraction. Worker failures fail widget loading without host parsing fallback.
 func WorkerRendererFactory(cfg WorkerConfig) RendererFactory {
 	cfg.Limits.applyDefaults()
+	if cfg.Limits.MaxFileBytes <= 0 || cfg.Limits.MaxFileBytes > ntmediabox.MaxRenderDataBytes {
+		cfg.Limits.MaxFileBytes = ntmediabox.MaxRenderDataBytes
+	}
+	if cfg.Limits.MaxRenderPixels <= 0 || cfg.Limits.MaxRenderPixels > ntmediabox.MaxRenderPixels {
+		cfg.Limits.MaxRenderPixels = ntmediabox.MaxRenderPixels
+	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultWorkerTimeout
 	}
@@ -290,6 +296,7 @@ func ServeWorkerWithFactory(conn io.ReadWriter, limits Limits, factory RendererF
 	h := &pdfWorkerHandler{
 		limits:  limits,
 		factory: factory,
+		timeout: DefaultWorkerTimeout,
 	}
 	return ntmediabox.ServeRender(conn, h)
 }
@@ -297,6 +304,7 @@ func ServeWorkerWithFactory(conn io.ReadWriter, limits Limits, factory RendererF
 type pdfWorkerHandler struct {
 	limits       Limits
 	factory      RendererFactory
+	timeout      time.Duration
 	r            Renderer
 	renderLimits Limits
 	pages        int
@@ -331,14 +339,14 @@ func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.Rend
 		if err != nil {
 			return ntmediabox.RenderResponse{Ended: true}, err
 		}
-		fn := h.factory
-		if fn == nil {
-			fn = DefaultRendererFactoryWithLimits(lim)
+		pageCount := len(pages)
+		pages = nil
+		var r Renderer
+		if h.factory != nil {
+			r, err = h.factory(req.Name, req.Data)
+		} else {
+			r, err = openRendererWithPages(req.Name, req.Data, nil, lim)
 		}
-		if fn == nil {
-			return ntmediabox.RenderResponse{Ended: true}, errors.New("pdf renderer unavailable on this target")
-		}
-		r, err := fn(req.Name, req.Data)
 		if err != nil {
 			if r != nil {
 				_ = r.Close()
@@ -349,8 +357,8 @@ func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.Rend
 			return ntmediabox.RenderResponse{Ended: true}, errors.New("pdf renderer factory returned nil")
 		}
 		h.r = r
-		h.renderLimits, h.pages = lim, len(pages)
-		return ntmediabox.RenderResponse{Meta: meta, Pages: len(pages)}, nil
+		h.renderLimits, h.pages = lim, pageCount
+		return ntmediabox.RenderResponse{Meta: meta, Pages: pageCount}, nil
 
 	case "pdf-render":
 		if h.r == nil {
@@ -366,7 +374,13 @@ func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.Rend
 		if h.renderLimits.MaxRenderDPI > 0 && dpi > h.renderLimits.MaxRenderDPI {
 			dpi = h.renderLimits.MaxRenderDPI
 		}
-		img, err := RenderPageContext(context.Background(), h.r, req.Page, dpi)
+		timeout := h.timeout
+		if timeout <= 0 {
+			timeout = DefaultWorkerTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		img, err := RenderPageContext(ctx, h.r, req.Page, dpi)
 		if err != nil {
 			return ntmediabox.RenderResponse{}, err
 		}

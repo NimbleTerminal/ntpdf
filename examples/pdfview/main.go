@@ -152,7 +152,7 @@ func (m model) Summary() string {
 		fit = "cover"
 	}
 	return fmt.Sprintf("Viewer: name=%s page=%d/%d mode=%s fit=%s zoom=%dx",
-		filepath.Base(m.pv.Name()), m.pv.Page(), m.pv.NumPages(), mode, fit, 1<<m.pv.Zoom())
+		ntpdf.SanitizeForTerminal(filepath.Base(m.pv.Name())), m.pv.Page(), m.pv.NumPages(), mode, fit, 1<<m.pv.Zoom())
 }
 
 func (m *model) resize() tea.Cmd {

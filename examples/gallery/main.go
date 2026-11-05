@@ -78,7 +78,7 @@ func (m model) Summary() string {
 		fit = "cover"
 	}
 	return fmt.Sprintf("Gallery: doc=%s (%d/%d) page=%d mode=%s fit=%s zoom=%dx",
-		filepath.Base(m.pv.Name()), m.docIdx+1, len(m.samples), m.pv.Page(), mode, fit, 1<<m.pv.Zoom())
+		ntpdf.SanitizeForTerminal(filepath.Base(m.pv.Name())), m.docIdx+1, len(m.samples), m.pv.Page(), mode, fit, 1<<m.pv.Zoom())
 }
 
 func (m *model) resize() tea.Cmd {

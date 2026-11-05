@@ -242,3 +242,76 @@ func FuzzDecodeWorkerPages(f *testing.F) {
 		}
 	})
 }
+
+type ctxBlockingWorkerRenderer struct{}
+
+func (ctxBlockingWorkerRenderer) RenderPage(int, int) (image.Image, error) {
+	return nil, errors.New("unexpected RenderPage without context")
+}
+
+func (ctxBlockingWorkerRenderer) RenderPageContext(ctx context.Context, _, _ int) (image.Image, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (ctxBlockingWorkerRenderer) Close() error { return nil }
+
+func TestWorkerHandlerEnforcesRenderDeadline(t *testing.T) {
+	source := buildSlowRenderPDF()
+	limits := Limits{}
+	limits.applyDefaults()
+	h := &pdfWorkerHandler{
+		limits:  limits,
+		timeout: 30 * time.Millisecond,
+		factory: func(string, []byte) (Renderer, error) { return ctxBlockingWorkerRenderer{}, nil },
+	}
+	defer h.Close()
+	if _, err := h.Handle(ntmediabox.RenderRequest{Kind: "pdf-open", Data: source}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.Handle(ntmediabox.RenderRequest{Kind: "pdf-render", Page: 1, DPI: 72})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected worker render deadline exceeded, got %v", err)
+	}
+}
+
+func TestCloseAndDisposeDuringInFlightWorkerLoadReleaseWorker(t *testing.T) {
+	meta := testWorkerMetadata(t)
+	for _, action := range []string{"close", "dispose", "supersede"} {
+		t.Run(action, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			factory, killed := responseWorkerFactory(t, time.Second, func(ntmediabox.RenderRequest) (ntmediabox.RenderResponse, error) {
+				close(started)
+				<-release
+				return ntmediabox.RenderResponse{Pages: 1, Meta: meta}, nil
+			})
+			m := NewWithConfig(Config{Cols: 80, Rows: 24, RendererFactory: factory})
+			cmd := m.SetPDFData("first.pdf", []byte("%PDF-1.4"))
+			done := make(chan any, 1)
+			go func() {
+				done <- cmd()
+			}()
+			<-started
+			switch action {
+			case "close":
+				if err := m.Close(); err != nil {
+					t.Fatal(err)
+				}
+			case "dispose":
+				_ = m.Dispose()
+			case "supersede":
+				_ = m.SetPDFData("second.pdf", []byte("%PDF-1.4"))
+			}
+			close(release)
+			// Wait for the in-flight load Cmd to finish without feeding its
+			// result into m.Update; finishTrackedLoad must still close and
+			// reap the superseded worker.
+			<-done
+			if killed.Load() != 1 {
+				t.Fatalf("expected superseded worker cleanup called once, got %d", killed.Load())
+			}
+			_ = m.Close()
+		})
+	}
+}

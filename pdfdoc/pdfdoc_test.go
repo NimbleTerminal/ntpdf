@@ -630,3 +630,93 @@ func TestOpenEnforcesLimits(t *testing.T) {
 	}
 }
 
+func TestPDFLeadingBytesBeforeHeaderRejected(t *testing.T) {
+	valid := samplePDF()
+	for _, prefix := range []string{" ", "\n", "%comment\n", "junk"} {
+		prefixed := append([]byte(prefix), valid...)
+		if err := checkPDFStreams(prefixed, Limits{}); err == nil {
+			t.Fatalf("checkPDFStreams accepted prefix %q before %%PDF- header", prefix)
+		}
+		if _, err := Open(prefixed, Limits{}); err == nil {
+			t.Fatalf("Open accepted prefix %q before %%PDF- header", prefix)
+		}
+	}
+
+	// Regression: leading space before %PDF- previously disabled strict mode
+	// and skipped final startxref boundary checks.
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Count 0 /Kids [] >>",
+		"(xref\n0 1\n0000000000 65535 f\ntrailer\n<< /Size 1 >>)",
+	}
+	data := append([]byte(" "), pdfFile("1.4", "", objects...)...)
+	hidden := bytes.Index(data, []byte("xref\n"))
+	data = append(data, []byte(fmt.Sprintf("(\nstartxref\n%d\n)\n%%%%EOF\n", hidden))...)
+	if _, err := Open(data, Limits{}); err == nil {
+		t.Fatal("Open accepted hidden startxref via leading-space header bypass")
+	}
+}
+
+func TestPDFIndirectLengthMustBeInUseInXref(t *testing.T) {
+	indirectLen := pdfFile("1.4", "",
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] /Contents 5 0 R >>",
+		"3",
+		"<< /Length 4 0 R >>\nstream\nq Q\nendstream",
+	)
+	lenOff := bytes.Index(indirectLen, []byte("4 0 obj"))
+	freeEntry := bytes.Replace(indirectLen, fmt.Appendf(nil, "%010d 00000 n", lenOff), []byte("0000000000 65535 f"), 1)
+	if err := checkPDFStreams(freeEntry, Limits{}); err == nil {
+		t.Fatal("indirect /Length resolving to free ('f') xref entry was accepted")
+	}
+}
+
+func TestPageImagesBoundsFormXObjectDAG(t *testing.T) {
+	// Build a depth-8 Form XObject chain where each Form invokes the next 20
+	// times with no Image XObjects (20^8 = 25.6 billion walks if unbounded).
+	var b bytes.Buffer
+	var offsets []int
+	object := func(body string) {
+		offsets = append(offsets, b.Len())
+		fmt.Fprintf(&b, "%d 0 obj\n%s\nendobj\n", len(offsets), body)
+	}
+	b.WriteString("%PDF-1.4\n")
+	object("<< /Type /Catalog /Pages 2 0 R >>")
+	object("<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+
+	var xobjMap strings.Builder
+	for i := 1; i <= 8; i++ {
+		fmt.Fprintf(&xobjMap, "/Fm%d %d 0 R ", i, 4+i)
+	}
+	res := fmt.Sprintf("<< /XObject << %s >> >>", xobjMap.String())
+	object(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources %s /Contents 4 0 R >>", res))
+	pageStream := strings.Repeat("/Fm1 Do ", 20)
+	object(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(pageStream), pageStream))
+	for i := 1; i <= 8; i++ {
+		body := "q Q"
+		if i < 8 {
+			body = strings.Repeat(fmt.Sprintf("/Fm%d Do ", i+1), 20)
+		}
+		object(fmt.Sprintf("<< /Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources %s /Length %d >>\nstream\n%s\nendstream", res, len(body), body))
+	}
+	start := b.Len()
+	fmt.Fprintf(&b, "xref\n0 %d\n0000000000 65535 f \n", len(offsets)+1)
+	for _, o := range offsets {
+		fmt.Fprintf(&b, "%010d 00000 n \n", o)
+	}
+	fmt.Fprintf(&b, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(offsets)+1, start)
+
+	doc, err := Open(b.Bytes(), Limits{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t0 := time.Now()
+	if got := doc.PageImages(1); got != 0 {
+		t.Fatalf("PageImages(1) = %d, want 0", got)
+	}
+	if elapsed := time.Since(t0); elapsed > 500*time.Millisecond {
+		t.Fatalf("PageImages took %v on Form XObject DAG; expected bounded execution", elapsed)
+	}
+}
+

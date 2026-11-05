@@ -212,6 +212,9 @@ func checkPDFStreams(data []byte, limits Limits) error {
 }
 
 func checkPDFStreamSyntax(data []byte, limits Limits) error {
+	if !bytes.HasPrefix(data, []byte("%PDF-")) && bytes.Contains(data[:min(len(data), 1024)], []byte("%PDF-")) {
+		return errors.New("PDF header is not at byte 0")
+	}
 	b := &pdfStreamBudget{
 		maxStream: limits.maxStreamBytes(),
 		maxTotal:  limits.maxInflatedBytes(),

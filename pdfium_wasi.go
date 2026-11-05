@@ -15,6 +15,8 @@
 
 package ntpdf
 
+import "errors"
+
 // DefaultRendererFactory returns nil under WASI: see file header for
 // rationale. Custom factories are responsible for their own resource
 // caps; Config.Limits.MaxFileBytes is only honored by the default
@@ -24,3 +26,7 @@ func DefaultRendererFactory() RendererFactory { return nil }
 // DefaultRendererFactoryWithLimits accepts the limits argument for API
 // parity with the native and js builds but ignores it.
 func DefaultRendererFactoryWithLimits(_ Limits) RendererFactory { return nil }
+
+func openRendererWithPages(_ string, _ []byte, _ []pdfPage, _ Limits) (Renderer, error) {
+	return nil, errors.New("pdf renderer unavailable on this target")
+}

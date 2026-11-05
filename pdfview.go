@@ -28,6 +28,7 @@ import (
 	"image"
 	"image/color"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -95,6 +96,11 @@ type Model struct {
 	loadGen   *uint64
 	renderGen *uint64
 
+	// initialOversizeLen records len(cfg.InitialData) when it exceeds
+	// cfg.Limits.MaxFileBytes at construction time so NewWithConfig can
+	// reject it at Init() without copying an oversized buffer.
+	initialOversizeLen int64
+
 	cache *pageCache
 
 	err error
@@ -129,7 +135,15 @@ func NewWithConfig(cfg Config) Model {
 	// public ownership contract promises callers can mutate the buffer
 	// the moment NewWithConfig returns. Doing the copy here guarantees
 	// that; the copyBytes call inside Init becomes belt-and-suspenders.
-	cfg.InitialData = copyBytes(cfg.InitialData)
+	// Skip copying when InitialData already exceeds MaxFileBytes.
+	var initialOversizeLen int64
+	hasInitialData := cfg.InitialData != nil
+	if cfg.Limits.MaxFileBytes > 0 && int64(len(cfg.InitialData)) > cfg.Limits.MaxFileBytes {
+		initialOversizeLen = int64(len(cfg.InitialData))
+		cfg.InitialData = []byte{}
+	} else {
+		cfg.InitialData = copyBytes(cfg.InitialData)
+	}
 	styles := DefaultStyles()
 	if cfg.Styles != nil {
 		styles = *cfg.Styles
@@ -152,6 +166,10 @@ func NewWithConfig(cfg Config) Model {
 	}
 
 	var lg, rg uint64
+	pathLabel := cfg.InitialPath
+	if hasInitialData {
+		pathLabel = initialName(cfg)
+	}
 	m := Model{
 		cfg:   cfg,
 		keys:  DefaultKeyMap(),
@@ -165,10 +183,11 @@ func NewWithConfig(cfg Config) Model {
 		// "Loading <name>…" or surface an error while the async load
 		// is in flight — without this, a failed initial load hides
 		// behind "No document loaded".
-		path:      initialPathLabel(cfg),
-		loadGen:   &lg,
-		renderGen: &rg,
-		cache:     &pageCache{},
+		path:               pathLabel,
+		loadGen:            &lg,
+		renderGen:          &rg,
+		initialOversizeLen: initialOversizeLen,
+		cache:              &pageCache{},
 	}
 	m.pic = m.newPicture()
 	return m
@@ -493,6 +512,8 @@ func (m *Model) Stop() tea.Cmd {
 // renderer and owned session. When switching Bubble Tea's View().AltScreen from
 // true to false on exit, use KeepOnMainScreen instead.
 func (m *Model) Keep() tea.Cmd {
+	bump(m.loadGen)
+	bump(m.renderGen)
 	m.clearCache()
 	var cmd tea.Cmd
 	if m.pic != nil {
@@ -511,6 +532,8 @@ func (m *Model) Keep() tea.Cmd {
 // survives a terminal screen switch from the alternate screen (ESC[?1049l) to
 // the main screen, and closes any attached PDF renderer and owned session.
 func (m *Model) KeepOnMainScreen() tea.Cmd {
+	bump(m.loadGen)
+	bump(m.renderGen)
 	m.clearCache()
 	var cmd tea.Cmd
 	if m.pic != nil {
@@ -529,6 +552,8 @@ func (m *Model) KeepOnMainScreen() tea.Cmd {
 // from ntpicture.Picture. Run the returned command when removing the widget or
 // before quitting.
 func (m *Model) Dispose() tea.Cmd {
+	bump(m.loadGen)
+	bump(m.renderGen)
 	m.clearCache()
 	var cmd tea.Cmd
 	if m.pic != nil {
@@ -546,6 +571,8 @@ func (m *Model) Dispose() tea.Cmd {
 // currently-loaded document (e.g. pdfium document handle and pool instance).
 // Safe to call when no document is loaded.
 func (m *Model) Close() error {
+	bump(m.loadGen)
+	bump(m.renderGen)
 	m.clearCache()
 	if m.pic != nil {
 		_ = m.pic.Close()
@@ -614,11 +641,21 @@ func (m *Model) SetPDFData(name string, data []byte) tea.Cmd {
 	m.err = nil
 	gen := bump(m.loadGen)
 	bump(m.renderGen)
+	if m.cfg.Limits.MaxFileBytes > 0 && int64(len(data)) > m.cfg.Limits.MaxFileBytes {
+		size := len(data)
+		limit := m.cfg.Limits.MaxFileBytes
+		return func() tea.Msg {
+			return pdfErrMsg{
+				err: fmt.Errorf("PDF %q is %d bytes, exceeds MaxFileBytes=%d", name, size, limit),
+				gen: gen,
+			}
+		}
+	}
 	// Defensive copy: the async load Cmd reads from `data` later, and
 	// pdf.NewReader holds a ReaderAt over the bytes for the lifetime
 	// of the load. Without the copy, a caller pooling buffers could
 	// see corruption / race with parsing.
-	return loadPDFFromBytesCmd(name, copyBytes(data), gen, m.cfg.RendererFactory, m.cfg.Limits)
+	return loadPDFFromBytesCmd(name, copyBytes(data), gen, m.loadGen, m.cfg.RendererFactory, m.cfg.Limits)
 }
 
 // copyBytes is a small helper for the data-ownership defense at the
@@ -660,7 +697,7 @@ func (m *Model) SetPDF(path string) tea.Cmd {
 	// this bump, a stale pageRenderedMsg whose page happens to match the
 	// new document's current page would be accepted as fresh.
 	bump(m.renderGen)
-	return loadPDFFromPathCmd(path, gen, m.cfg.RendererFactory, m.cfg.Limits)
+	return loadPDFFromPathCmd(path, gen, m.loadGen, m.cfg.RendererFactory, m.cfg.Limits)
 }
 
 // SetPage jumps to the given 1-indexed page. Returns a render Cmd when
@@ -852,11 +889,22 @@ func (m Model) Init() tea.Cmd {
 	case m.cfg.InitialData != nil:
 		gen := bump(m.loadGen)
 		name := initialName(m.cfg)
+		if m.initialOversizeLen > 0 {
+			size := m.initialOversizeLen
+			limit := m.cfg.Limits.MaxFileBytes
+			cmds = append(cmds, func() tea.Msg {
+				return pdfErrMsg{
+					err: fmt.Errorf("PDF %q is %d bytes, exceeds MaxFileBytes=%d", name, size, limit),
+					gen: gen,
+				}
+			})
+			break
+		}
 		// Defensive copy at the boundary; see SetPDFData for rationale.
-		cmds = append(cmds, loadPDFFromBytesCmd(name, copyBytes(m.cfg.InitialData), gen, m.cfg.RendererFactory, m.cfg.Limits))
+		cmds = append(cmds, loadPDFFromBytesCmd(name, copyBytes(m.cfg.InitialData), gen, m.loadGen, m.cfg.RendererFactory, m.cfg.Limits))
 	case m.cfg.InitialPath != "":
 		gen := bump(m.loadGen)
-		cmds = append(cmds, loadPDFFromPathCmd(m.cfg.InitialPath, gen, m.cfg.RendererFactory, m.cfg.Limits))
+		cmds = append(cmds, loadPDFFromPathCmd(m.cfg.InitialPath, gen, m.loadGen, m.cfg.RendererFactory, m.cfg.Limits))
 	}
 	return tea.Batch(cmds...)
 }
@@ -870,24 +918,21 @@ func initialName(cfg Config) string {
 	return "embedded"
 }
 
-// initialPathLabel picks the display label seeded into m.path at
-// construction time. Mirrors Init's "InitialData wins" precedence so
-// the in-flight Loading message and any pre-load error match the
-// source that's actually being loaded.
-func initialPathLabel(cfg Config) string {
-	if cfg.InitialData != nil {
-		return initialName(cfg)
+// bump atomically increments *p and returns the new value. Atomic access
+// allows background load goroutines to safely check whether their generation
+// was superseded by SetPDF, Close, Dispose, or Keep.
+func bump(p *uint64) uint64 {
+	if p == nil {
+		return 0
 	}
-	return cfg.InitialPath
+	return atomic.AddUint64(p, 1)
 }
 
-// bump increments *p and returns the new value. Sole writer is the UI
-// goroutine (Bubble Tea Update loop), so no atomic ordering is needed —
-// the pointer indirection exists only so value-receiver method copies
-// share a single counter.
-func bump(p *uint64) uint64 {
-	*p++
-	return *p
+func currentGen(p *uint64) uint64 {
+	if p == nil {
+		return 0
+	}
+	return atomic.LoadUint64(p)
 }
 
 // Update routes messages through the picture.Picture, consumes the
@@ -909,7 +954,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case pdfLoadedMsg:
-		if msg.gen != *m.loadGen {
+		if msg.gen != currentGen(m.loadGen) {
 			// Stale load: a newer SetPDF superseded it. Close the Renderer
 			// the stale load built so we don't leak its document handle /
 			// pdfium pool instance.
@@ -940,12 +985,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case pdfErrMsg:
-		if msg.gen == *m.loadGen {
+		if msg.gen == currentGen(m.loadGen) {
 			m.err = msg.err
 		}
 
 	case pageRenderedMsg:
-		if msg.gen != *m.renderGen || msg.loadGen != *m.loadGen || msg.page != m.page {
+		if msg.gen != currentGen(m.renderGen) || msg.loadGen != currentGen(m.loadGen) || msg.page != m.page {
 			break // stale doc, stale render, or page changed under us
 		}
 		m.sourceImage = msg.img
@@ -961,7 +1006,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case pageRenderErrMsg:
-		if msg.gen == *m.renderGen && msg.loadGen == *m.loadGen && msg.page == m.page {
+		if msg.gen == currentGen(m.renderGen) && msg.loadGen == currentGen(m.loadGen) && msg.page == m.page {
 			m.err = msg.err
 		}
 	}
@@ -1040,7 +1085,7 @@ func (m *Model) renderPageCmd(page int) tea.Cmd {
 		dpi = m.calcDynamicDPI(page)
 	}
 	gen := bump(m.renderGen)
-	loadGen := *m.loadGen
+	loadGen := currentGen(m.loadGen)
 
 	if img := m.checkCache(page, dpi); img != nil {
 		return func() tea.Msg {

@@ -81,7 +81,7 @@ func (m model) Summary() string {
 		fit = "cover"
 	}
 	return fmt.Sprintf("Inspector: doc=%s (%d/%d) page=%d fit=%s zoom=%dx",
-		filepath.Base(m.pv.Name()), m.docIdx+1, len(m.samples), m.pv.Page(), fit, 1<<m.pv.Zoom())
+		ntpdf.SanitizeForTerminal(filepath.Base(m.pv.Name())), m.docIdx+1, len(m.samples), m.pv.Page(), fit, 1<<m.pv.Zoom())
 }
 
 func (m model) paneDims() (leftW, rightW, innerH int) {

@@ -250,6 +250,9 @@ func Open(data []byte, limits Limits) (*Document, error) {
 	if limits.MaxFileBytes > 0 && int64(len(data)) > limits.MaxFileBytes {
 		return nil, fmt.Errorf("PDF is %d bytes, exceeds MaxFileBytes=%d", len(data), limits.MaxFileBytes)
 	}
+	if !bytes.HasPrefix(data, []byte("%PDF-")) {
+		return nil, errors.New("missing %PDF- header at start of file")
+	}
 	if err := checkPDFStreams(data, limits); err != nil {
 		return nil, err
 	}
@@ -399,9 +402,13 @@ func (d *Document) PageImages(page int) int {
 			return 0, nil
 		}
 		count := 0
+		forms := 0
+		ops := 0
+		const maxFormWalks = 256
+		maxOps := max(1024, min(maxImageDraws, 100_000)*16)
 		var walk func(content, resources pdf.Value, depth int)
 		walk = func(content, resources pdf.Value, depth int) {
-			if content.IsNull() || depth > maxFormDepth {
+			if content.IsNull() || depth > maxFormDepth || count >= maxImageDraws || ops >= maxOps {
 				return
 			}
 			pdf.Interpret(content, func(stk *pdf.Stack, op string) {
@@ -409,7 +416,8 @@ func (d *Document) PageImages(page int) int {
 				for stk.Len() > 0 {
 					operand = stk.Pop() // Do takes one; the last popped is the first pushed.
 				}
-				if count >= maxImageDraws {
+				ops++
+				if count >= maxImageDraws || ops > maxOps {
 					return
 				}
 				switch op {
@@ -421,6 +429,10 @@ func (d *Document) PageImages(page int) int {
 					case "Image":
 						count++
 					case "Form":
+						if forms >= maxFormWalks {
+							return
+						}
+						forms++
 						inner := x.Key("Resources")
 						if inner.IsNull() {
 							inner = resources

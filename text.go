@@ -4,6 +4,7 @@
 package ntpdf
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -63,8 +64,11 @@ type pdfErrMsg struct {
 // loadPDFFromPathCmd reads the file at path (subject to MaxFileBytes)
 // and runs the bytes-based loader against the resulting in-memory copy.
 // Returns a Cmd suitable for the Bubble Tea program loop.
-func loadPDFFromPathCmd(path string, gen uint64, factory RendererFactory, limits Limits) tea.Cmd {
+func loadPDFFromPathCmd(path string, gen uint64, loadGen *uint64, factory RendererFactory, limits Limits) tea.Cmd {
 	return func() tea.Msg {
+		if loadGen != nil && currentGen(loadGen) != gen {
+			return pdfErrMsg{err: context.Canceled, gen: gen}
+		}
 		f, err := os.Open(path)
 		if err != nil {
 			return pdfErrMsg{err: fmt.Errorf("open %q: %w", path, err), gen: gen}
@@ -83,7 +87,10 @@ func loadPDFFromPathCmd(path string, gen uint64, factory RendererFactory, limits
 		if err != nil {
 			return pdfErrMsg{err: fmt.Errorf("read %q: %w", path, err), gen: gen}
 		}
-		return runLoadFromBytes(path, data, gen, factory, limits)
+		if loadGen != nil && currentGen(loadGen) != gen {
+			return pdfErrMsg{err: context.Canceled, gen: gen}
+		}
+		return finishTrackedLoad(runLoadFromBytes(path, data, gen, factory, limits), gen, loadGen)
 	}
 }
 
@@ -112,8 +119,28 @@ func readPDFBytes(r io.Reader, limit int64) ([]byte, error) {
 // loadPDFFromBytesCmd loads an in-memory PDF without touching the disk.
 // name is the display label carried into pdfLoadedMsg.path so the
 // status bar can identify the document.
-func loadPDFFromBytesCmd(name string, data []byte, gen uint64, factory RendererFactory, limits Limits) tea.Cmd {
-	return func() tea.Msg { return runLoadFromBytes(name, data, gen, factory, limits) }
+func loadPDFFromBytesCmd(name string, data []byte, gen uint64, loadGen *uint64, factory RendererFactory, limits Limits) tea.Cmd {
+	return func() tea.Msg {
+		if loadGen != nil && currentGen(loadGen) != gen {
+			return pdfErrMsg{err: context.Canceled, gen: gen}
+		}
+		return finishTrackedLoad(runLoadFromBytes(name, data, gen, factory, limits), gen, loadGen)
+	}
+}
+
+// finishTrackedLoad closes any newly opened Renderer immediately inside the
+// background load goroutine when the generation was superseded while loading
+// (by SetPDF, Close, Dispose, or Keep), so a worker subprocess is never leaked
+// even if Model.Update is not called after disposal.
+func finishTrackedLoad(msg tea.Msg, gen uint64, loadGen *uint64) tea.Msg {
+	if loadGen != nil && currentGen(loadGen) != gen {
+		if loaded, ok := msg.(pdfLoadedMsg); ok && loaded.renderer != nil {
+			_ = loaded.renderer.Close()
+			loaded.renderer = nil
+			return loaded
+		}
+	}
+	return msg
 }
 
 // runLoadFromBytes is the shared body of both loaders. Parses the PDF
