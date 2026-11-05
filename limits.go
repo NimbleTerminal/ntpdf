@@ -56,3 +56,11 @@ func (l *limitedRenderer) RenderPageContext(ctx context.Context, pageNum, dpi in
 }
 
 func (l *limitedRenderer) Close() error { return l.inner.Close() }
+
+// Preserve the confined metadata capability through the DPI wrapper.
+func (l *limitedRenderer) pdfPages() []pdfPage {
+	if p, ok := l.inner.(pdfPagesProvider); ok {
+		return p.pdfPages()
+	}
+	return nil
+}

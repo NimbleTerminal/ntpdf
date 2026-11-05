@@ -46,6 +46,10 @@ func (s *stubWorkerPDFRenderer) RenderPage(pageNum, dpi int) (image.Image, error
 func (s *stubWorkerPDFRenderer) Close() error { return nil }
 
 func TestWorkerRendererInMemoryPipeAndCancel(t *testing.T) {
+	data, err := os.ReadFile(repoTestdata(t, "Example.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	hangNext := false
 	factory := WorkerRendererFactory(WorkerConfig{
 		Start: func(cfg WorkerConfig) (io.ReadWriteCloser, func() error, error) {
@@ -57,7 +61,7 @@ func TestWorkerRendererInMemoryPipeAndCancel(t *testing.T) {
 		},
 	})
 
-	r, err := factory("doc.pdf", []byte("%PDF-1.4 stub"))
+	r, err := factory("doc.pdf", data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +79,7 @@ func TestWorkerRendererInMemoryPipeAndCancel(t *testing.T) {
 	// Cancel a render and verify ErrRendererStopped on subsequent calls.
 	_ = r.Close()
 	hangNext = true
-	r2, err := factory("doc.pdf", []byte("%PDF-1.4 stub"))
+	r2, err := factory("doc.pdf", data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +116,12 @@ func TestWorkerRendererSandboxedSubprocess(t *testing.T) {
 			t.Skip("ntconfine-stage not beside test binary on Linux")
 		}
 	}
+	data, err := os.ReadFile(repoTestdata(t, "Example.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	factory := WorkerRendererFactory(cfg)
-	r, err := factory("sandboxed.pdf", []byte("%PDF-1.4 sandboxed"))
+	r, err := factory("sandboxed.pdf", data)
 	if err != nil {
 		t.Fatal(err)
 	}

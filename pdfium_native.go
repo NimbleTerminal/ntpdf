@@ -71,6 +71,7 @@ func pdfiumPoolConfig() webassembly.Config {
 // likely UB. Render durations (hundreds of ms in pdfium) are short
 // enough that blocking SetPDF on the in-flight call is acceptable.
 type pdfiumRenderer struct {
+	pages         []pdfPage
 	mu            sync.Mutex
 	instance      pdfium.Pdfium
 	docRef        references.FPDF_DOCUMENT
@@ -105,9 +106,9 @@ func DefaultRendererFactory() RendererFactory {
 // resource caps. MaxRenderPixels is enforced inside the pdfium renderer
 // (it's the only layer that knows the page's physical dimensions);
 // MaxRenderDPI is enforced by the withLimits wrapper NewWithConfig
-// applies over the top. MaxFileBytes is enforced upstream of the
-// factory — loadPDFCmd checks file size on disk via os.Stat for path
-// loads and checks len(data) for SetPDFData loads.
+// applies over the top. The factory preflights and extracts text before
+// opening PDFium, enforcing byte and parsing caps even for direct callers.
+// The widget also bounds path reads and checks SetPDFData byte length.
 //
 // The factory takes raw bytes because pdfium's OpenDocument is itself
 // bytes-based; routing file I/O through the widget instead of the
@@ -116,6 +117,10 @@ func DefaultRendererFactory() RendererFactory {
 func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 	limits.applyDefaults()
 	return func(name string, data []byte) (Renderer, error) {
+		pages, err := extractDocumentPages(data, limits)
+		if err != nil {
+			return nil, err
+		}
 		pdfiumOnce.Do(func() {
 			pdfiumPool, pdfiumErr = webassembly.Init(pdfiumPoolConfig())
 		})
@@ -139,6 +144,7 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 			return nil, fmt.Errorf("pdfium OpenDocument %q: %w", name, err)
 		}
 		r := &pdfiumRenderer{
+			pages:           pages,
 			instance:        inst,
 			docRef:          doc.Document,
 			maxRenderPixels: limits.MaxRenderPixels,
@@ -322,3 +328,5 @@ func (r *pdfiumRenderer) Close() error {
 	r.instance = nil
 	return err
 }
+
+func (r *pdfiumRenderer) pdfPages() []pdfPage { return r.pages }

@@ -24,6 +24,7 @@ import (
 // jsRenderer adapts a pdfium.Document to the Renderer and ContextRenderer
 // interfaces.
 type jsRenderer struct {
+	pages           []pdfPage
 	mu              sync.Mutex
 	doc             *pdfium.Document
 	maxRenderPixels int
@@ -49,6 +50,10 @@ func DefaultRendererFactory() RendererFactory {
 func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 	limits.applyDefaults()
 	return func(name string, data []byte) (Renderer, error) {
+		pages, err := extractDocumentPages(data, limits)
+		if err != nil {
+			return nil, err
+		}
 		if len(data) == 0 {
 			return nil, fmt.Errorf("empty PDF data for %q", name)
 		}
@@ -56,7 +61,7 @@ func DefaultRendererFactoryWithLimits(limits Limits) RendererFactory {
 		if err != nil {
 			return nil, fmt.Errorf("ntshim/pdfium load %q: %w", name, err)
 		}
-		return &jsRenderer{doc: doc, maxRenderPixels: limits.MaxRenderPixels}, nil
+		return &jsRenderer{doc: doc, maxRenderPixels: limits.MaxRenderPixels, pages: pages}, nil
 	}
 }
 
@@ -164,3 +169,5 @@ func (r *jsRenderer) clampDPIToBudget(pageNum, dpi int) int {
 // Close releases the document. Idempotent; serialization against an
 // in-flight RenderPage is handled inside pdfium.Document.
 func (r *jsRenderer) Close() error { return r.doc.Close() }
+
+func (r *jsRenderer) pdfPages() []pdfPage { return r.pages }

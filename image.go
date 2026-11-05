@@ -67,11 +67,15 @@ func RenderPageContext(ctx context.Context, r Renderer, pageNum, dpi int) (image
 // bound to it. name is a human-readable label (typically the filename
 // or "embedded"), used for diagnostics; it is not parsed.
 //
-// The widget invokes the factory on every SetPDF / SetPDFData call.
+// The widget invokes the factory on every SetPDF / SetPDFData call, before
+// host text extraction. Custom factories must treat data as untrusted and
+// perform their own preflight or isolation; the built-in local factories
+// preflight before PDFium, and WorkerRendererFactory parses only in its worker.
 // For path-based loads the widget reads the file once and passes the
 // bytes here, so factories never have to do their own I/O. A nil
 // return value is valid when the platform has no renderer available
-// (e.g. js/wasm), causing ImageMode to degrade to TextMode.
+// (e.g. WASI), causing ImageMode to degrade to TextMode.
+// WorkerRendererFactory failures instead fail the load without host parsing.
 type RendererFactory func(name string, data []byte) (Renderer, error)
 
 // pageRenderedMsg is delivered when a Renderer.RenderPage call succeeds.

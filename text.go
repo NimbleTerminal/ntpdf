@@ -6,6 +6,7 @@ package ntpdf
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -42,7 +43,7 @@ type pdfPage struct {
 // pdfLoadedMsg is delivered when a SetPDF Cmd completes successfully.
 // renderer is non-nil when the configured RendererFactory produced one
 // for this load; the Model takes ownership of Closing it. rendererErr
-// is non-nil when the factory was configured but errored — TextMode is
+// is non-nil when a local factory was configured but errored — TextMode is
 // fully usable in that case, but ImageMode degrades and hosts can show
 // the error to explain why.
 type pdfLoadedMsg struct {
@@ -64,25 +65,48 @@ type pdfErrMsg struct {
 // Returns a Cmd suitable for the Bubble Tea program loop.
 func loadPDFFromPathCmd(path string, gen uint64, factory RendererFactory, limits Limits) tea.Cmd {
 	return func() tea.Msg {
+		f, err := os.Open(path)
+		if err != nil {
+			return pdfErrMsg{err: fmt.Errorf("open %q: %w", path, err), gen: gen}
+		}
+		defer f.Close()
 		if limits.MaxFileBytes > 0 {
-			info, err := os.Stat(path)
+			info, err := f.Stat()
 			if err != nil {
-				return pdfErrMsg{err: fmt.Errorf("stat %q: %w", path, err), gen: gen}
+				return pdfErrMsg{err: err, gen: gen}
 			}
 			if info.Size() > limits.MaxFileBytes {
-				return pdfErrMsg{
-					err: fmt.Errorf("PDF %q is %d bytes, exceeds MaxFileBytes=%d",
-						path, info.Size(), limits.MaxFileBytes),
-					gen: gen,
-				}
+				return pdfErrMsg{err: fmt.Errorf("PDF %q exceeds MaxFileBytes=%d", path, limits.MaxFileBytes), gen: gen}
 			}
 		}
-		data, err := os.ReadFile(path)
+		data, err := readPDFBytes(f, limits.MaxFileBytes)
 		if err != nil {
 			return pdfErrMsg{err: fmt.Errorf("read %q: %w", path, err), gen: gen}
 		}
 		return runLoadFromBytes(path, data, gen, factory, limits)
 	}
+}
+
+// Bound the read itself: stat alone cannot cap a file that grows while read.
+func readPDFBytes(r io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return io.ReadAll(r)
+	}
+	data, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) == limit {
+		var extra [1]byte
+		n, err := io.ReadFull(r, extra[:])
+		if n != 0 {
+			return nil, fmt.Errorf("PDF exceeds MaxFileBytes=%d", limit)
+		}
+		if err != io.EOF {
+			return nil, err
+		}
+	}
+	return data, nil
 }
 
 // loadPDFFromBytesCmd loads an in-memory PDF without touching the disk.
@@ -100,9 +124,10 @@ func loadPDFFromBytesCmd(name string, data []byte, gen uint64, factory RendererF
 // SetPDFData path can't bypass it.
 // limits.MaxPages caps the pdfPage slice allocation; an attacker
 // claiming billions of pages can't OOM us before the first read.
-// Renderer-open failures don't fail the whole load — TextMode works
+// Local renderer-open failures do not fail the whole load — TextMode works
 // fine; only ImageMode degrades. The factory's error rides through
-// pdfLoadedMsg.rendererErr for hosts to surface.
+// pdfLoadedMsg.rendererErr for hosts to surface. Confined worker failures fail
+// the load, without any host parser fallback.
 //
 // The named-return defer catches panics from anywhere in the parser
 // path (pdf.NewReader, NumPage, r.Page(i) — extractPage has its own
@@ -110,6 +135,12 @@ func loadPDFFromBytesCmd(name string, data []byte, gen uint64, factory RendererF
 // turns them into pdfErrMsg so the load goroutine never crashes the
 // program.
 func runLoadFromBytes(name string, data []byte, gen uint64, factory RendererFactory, limits Limits) (msg tea.Msg) {
+	var renderer Renderer
+	defer func() {
+		if _, ok := msg.(pdfLoadedMsg); !ok && renderer != nil {
+			_ = renderer.Close()
+		}
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			msg = pdfErrMsg{
@@ -129,27 +160,26 @@ func runLoadFromBytes(name string, data []byte, gen uint64, factory RendererFact
 	if len(data) == 0 {
 		return pdfErrMsg{err: errors.New("empty pdf data"), gen: gen}
 	}
-	doc, err := pdfdoc.Open(data, pdfdoc.Limits{
-		MaxFileBytes:     limits.MaxFileBytes,
-		MaxPages:         limits.MaxPages,
-		MaxStreamBytes:   limits.MaxStreamBytes,
-		MaxInflatedBytes: limits.MaxInflatedBytes,
-		MaxImagePixels:   int64(limits.MaxRenderPixels),
-		MaxImageDraws:    limits.MaxImagesPerPage,
-	})
-	if err != nil {
-		return pdfErrMsg{err: fmt.Errorf("parse %q: %w", name, err), gen: gen}
-	}
-	n := doc.NumPages()
-	pages := make([]pdfPage, n)
-	for i := 1; i <= n; i++ {
-		pages[i-1] = extractPage(doc, i)
-	}
-
-	var renderer Renderer
 	var rendererErr error
 	if factory != nil {
 		renderer, rendererErr = factory(name, data)
+		var confined *confinedLoadError
+		if errors.As(rendererErr, &confined) {
+			return pdfErrMsg{err: rendererErr, gen: gen}
+		}
+	}
+	// Worker metadata is required for confined loads: never reparse their PDF
+	// bytes in the host, including when the worker fails to start or open.
+	var pages []pdfPage
+	if provider, ok := renderer.(pdfPagesProvider); ok {
+		pages = provider.pdfPages()
+	}
+	if pages == nil {
+		var err error
+		pages, err = extractDocumentPages(data, limits)
+		if err != nil {
+			return pdfErrMsg{err: fmt.Errorf("parse %q: %w", name, err), gen: gen}
+		}
 	}
 	return pdfLoadedMsg{
 		path:        name,
@@ -158,6 +188,23 @@ func runLoadFromBytes(name string, data []byte, gen uint64, factory RendererFact
 		rendererErr: rendererErr,
 		gen:         gen,
 	}
+}
+
+// extractDocumentPages runs only in the local loader or inside a PDF worker.
+func extractDocumentPages(data []byte, limits Limits) ([]pdfPage, error) {
+	doc, err := pdfdoc.Open(data, pdfdoc.Limits{
+		MaxFileBytes: limits.MaxFileBytes, MaxPages: limits.MaxPages,
+		MaxStreamBytes: limits.MaxStreamBytes, MaxInflatedBytes: limits.MaxInflatedBytes,
+		MaxImagePixels: int64(limits.MaxRenderPixels), MaxImageDraws: limits.MaxImagesPerPage,
+	})
+	if err != nil {
+		return nil, err
+	}
+	pages := make([]pdfPage, doc.NumPages())
+	for i := range pages {
+		pages[i] = extractPage(doc, i+1)
+	}
+	return pages, nil
 }
 
 // extractPage pulls MediaBox, positioned text runs, and image count from a

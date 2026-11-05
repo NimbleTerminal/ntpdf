@@ -235,7 +235,8 @@ type Config struct {
 	// go-pdfium (wazero) on native, the @embedpdf/pdfium JS bridge on
 	// GOOS=js GOARCH=wasm, nil on GOOS=wasip1 GOARCH=wasm. When the
 	// factory returns nil ImageMode falls back to TextMode at View()
-	// time.
+	// time. Use WorkerRendererFactory for OS-confined parsing and rendering;
+	// its failures fail the load without local text parsing fallback.
 	RendererFactory RendererFactory
 
 	// RenderDPI controls the rasterization resolution passed to the

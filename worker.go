@@ -2,6 +2,7 @@ package ntpdf
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -10,12 +11,16 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"time"
 
 	"nimbleterminal.dev/ntmediabox"
 )
 
+// DefaultWorkerTimeout bounds each worker open (including text extraction) or render.
+const DefaultWorkerTimeout = 15 * time.Second
+
 // WorkerConfig configures an OS-confined ntmediabox worker process for PDF page
-// rasterization.
+// parsing, text extraction, and rasterization.
 type WorkerConfig struct {
 	// WorkerPath is the worker executable path. When empty, os.Executable() is used.
 	WorkerPath string
@@ -31,9 +36,13 @@ type WorkerConfig struct {
 	// AllowUnsandboxed permits running the worker in an isolated child process
 	// without OS kernel confinement when Probe().Available is false.
 	AllowUnsandboxed bool
-	// Limits bounds file size, DPI, and per-page pixel count.
+	// Timeout bounds each open or render operation. Non-positive values use DefaultWorkerTimeout.
+	Timeout time.Duration
+	// Limits bounds parsing and rendering. Also set Config.Limits for host file reads.
+	// Negative values cannot disable wire or worker-side caps.
 	Limits Limits
-	// Start overrides process startup (used by tests or custom transports).
+	// Start overrides startup and confinement; trusted callers must supply a closable
+	// transport and a cleanup function that kills and reaps their worker.
 	Start func(cfg WorkerConfig) (io.ReadWriteCloser, func() error, error)
 }
 
@@ -43,15 +52,29 @@ type workerRenderer struct {
 	closeFn         func() error
 	maxRenderPixels int
 	maxRenderDPI    int
+	timeout         time.Duration
+	pages           []pdfPage
 	stopped         bool
 	closed          bool
 }
 
 // WorkerRendererFactory returns a RendererFactory that opens and rasterizes each
-// PDF inside a separate OS-confined ntmediabox worker process.
+// PDF inside a separate OS-confined ntmediabox worker process, including text
+// extraction. Worker failures fail widget loading without host parsing fallback.
 func WorkerRendererFactory(cfg WorkerConfig) RendererFactory {
 	cfg.Limits.applyDefaults()
-	return func(name string, data []byte) (Renderer, error) {
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultWorkerTimeout
+	}
+	return func(name string, data []byte) (renderer Renderer, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				err = fmt.Errorf("PDF worker panic: %v", rec)
+			}
+			if err != nil {
+				err = &confinedLoadError{err}
+			}
+		}()
 		if len(data) == 0 {
 			return nil, fmt.Errorf("pdf worker OpenDocument %q: empty data", name)
 		}
@@ -82,6 +105,12 @@ func WorkerRendererFactory(cfg WorkerConfig) RendererFactory {
 			return cerr
 		}
 
+		opened := false
+		defer func() {
+			if !opened {
+				_ = killAndClose()
+			}
+		}()
 		client := ntmediabox.NewRenderClientWithKill(conn, func() {
 			_ = killAndClose()
 		})
@@ -89,7 +118,14 @@ func WorkerRendererFactory(cfg WorkerConfig) RendererFactory {
 		if maxPixels <= 0 || maxPixels > ntmediabox.MaxRenderPixels {
 			maxPixels = ntmediabox.MaxRenderPixels
 		}
-		_, err = client.Do(context.Background(), ntmediabox.RenderRequest{
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+		defer cancel()
+		options, err := json.Marshal(cfg.Limits)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := client.Do(ctx, ntmediabox.RenderRequest{
+			Meta:      options,
 			Kind:      "pdf-open",
 			Name:      name,
 			MaxPixels: maxPixels,
@@ -100,7 +136,17 @@ func WorkerRendererFactory(cfg WorkerConfig) RendererFactory {
 			_ = killAndClose()
 			return nil, err
 		}
+		pages, err := decodeWorkerPages(resp.Meta, cfg.Limits)
+		if err != nil {
+			return nil, err
+		}
+		if resp.Ended || resp.Pages != len(pages) {
+			return nil, errors.New("invalid PDF worker open response")
+		}
+		opened = true
 		return &workerRenderer{
+			pages:           pages,
+			timeout:         cfg.Timeout,
 			client:          client,
 			closeFn:         killAndClose,
 			maxRenderPixels: maxPixels,
@@ -158,22 +204,23 @@ func (r *workerRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int
 		ctx = context.Background()
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.stopped {
+		r.mu.Unlock()
 		return nil, ErrRendererStopped
 	}
 	if r.closed || r.client == nil {
+		r.mu.Unlock()
 		return nil, errors.New("pdf worker renderer closed")
 	}
+	client := r.client
+	r.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
 	if err := ctx.Err(); err != nil {
-		r.stopped = true
-		_ = r.client.Close()
-		if r.closeFn != nil {
-			_ = r.closeFn()
-		}
+		r.stop()
 		return nil, fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, err)
 	}
-	if pageNum < 1 {
+	if pageNum < 1 || pageNum > len(r.pages) {
 		return nil, fmt.Errorf("invalid page %d (1-indexed)", pageNum)
 	}
 	if dpi <= 0 {
@@ -182,7 +229,7 @@ func (r *workerRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int
 	if r.maxRenderDPI > 0 && dpi > r.maxRenderDPI {
 		dpi = r.maxRenderDPI
 	}
-	resp, err := r.client.Do(ctx, ntmediabox.RenderRequest{
+	resp, err := client.Do(ctx, ntmediabox.RenderRequest{
 		Kind:      "pdf-render",
 		Page:      pageNum,
 		DPI:       dpi,
@@ -190,36 +237,44 @@ func (r *workerRenderer) RenderPageContext(ctx context.Context, pageNum, dpi int
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			r.stopped = true
-			_ = r.client.Close()
-			if r.closeFn != nil {
-				_ = r.closeFn()
-			}
+			r.stop()
 			return nil, fmt.Errorf("RenderPageInDPI page=%d: %w", pageNum, ctx.Err())
 		}
 		return nil, err
 	}
-	if resp.Image == nil {
-		return nil, fmt.Errorf("RenderPageInDPI page=%d: worker returned nil image", pageNum)
+	if resp.Ended || resp.Image == nil || resp.Page != pageNum {
+		r.stop()
+		return nil, fmt.Errorf("RenderPageInDPI page=%d: invalid worker response", pageNum)
 	}
 	return resp.Image, nil
 }
 
+func (r *workerRenderer) pdfPages() []pdfPage { return r.pages }
+
+func (r *workerRenderer) stop() {
+	r.mu.Lock()
+	r.stopped = true
+	r.mu.Unlock()
+	_ = r.client.Close()
+}
+
 func (r *workerRenderer) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
+		r.mu.Unlock()
 		return nil
 	}
 	r.closed = true
-	var err error
-	if r.client != nil {
-		_ = r.client.Close()
+	client, closeFn := r.client, r.closeFn
+	r.mu.Unlock()
+	// Never hold the state lock across RPC: Close must interrupt a hung render.
+	if client != nil {
+		_ = client.Close()
 	}
-	if r.closeFn != nil {
-		err = r.closeFn()
+	if closeFn != nil {
+		return closeFn()
 	}
-	return err
+	return nil
 }
 
 // ServeWorker runs the confined worker side of a PDF renderer over conn using
@@ -240,9 +295,11 @@ func ServeWorkerWithFactory(conn io.ReadWriter, limits Limits, factory RendererF
 }
 
 type pdfWorkerHandler struct {
-	limits  Limits
-	factory RendererFactory
-	r       Renderer
+	limits       Limits
+	factory      RendererFactory
+	r            Renderer
+	renderLimits Limits
+	pages        int
 }
 
 func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.RenderResponse, error) {
@@ -253,11 +310,26 @@ func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.Rend
 			h.r = nil
 		}
 		lim := h.limits
+		if len(req.Meta) > 0 {
+			var options Limits
+			if len(req.Meta) > 1024 || json.Unmarshal(req.Meta, &options) != nil {
+				return ntmediabox.RenderResponse{Ended: true}, errors.New("invalid PDF open limits")
+			}
+			lim = tighterWorkerLimits(lim, options)
+		}
 		if req.MaxPixels > 0 && (lim.MaxRenderPixels <= 0 || req.MaxPixels < lim.MaxRenderPixels) {
 			lim.MaxRenderPixels = req.MaxPixels
 		}
 		if lim.MaxFileBytes > 0 && int64(len(req.Data)) > lim.MaxFileBytes {
 			return ntmediabox.RenderResponse{Ended: true}, fmt.Errorf("pdf exceeds %d bytes", lim.MaxFileBytes)
+		}
+		pages, err := extractDocumentPages(req.Data, lim)
+		if err != nil {
+			return ntmediabox.RenderResponse{Ended: true}, err
+		}
+		meta, err := encodeWorkerPages(pages, lim)
+		if err != nil {
+			return ntmediabox.RenderResponse{Ended: true}, err
 		}
 		fn := h.factory
 		if fn == nil {
@@ -268,32 +340,39 @@ func (h *pdfWorkerHandler) Handle(req ntmediabox.RenderRequest) (ntmediabox.Rend
 		}
 		r, err := fn(req.Name, req.Data)
 		if err != nil {
+			if r != nil {
+				_ = r.Close()
+			}
 			return ntmediabox.RenderResponse{Ended: true}, err
 		}
 		if r == nil {
 			return ntmediabox.RenderResponse{Ended: true}, errors.New("pdf renderer factory returned nil")
 		}
 		h.r = r
-		return ntmediabox.RenderResponse{}, nil
+		h.renderLimits, h.pages = lim, len(pages)
+		return ntmediabox.RenderResponse{Meta: meta, Pages: len(pages)}, nil
 
 	case "pdf-render":
 		if h.r == nil {
 			return ntmediabox.RenderResponse{Ended: true}, errors.New("no PDF document open in worker")
 		}
+		if req.Page < 1 || req.Page > h.pages {
+			return ntmediabox.RenderResponse{}, errors.New("invalid PDF page")
+		}
 		dpi := req.DPI
 		if dpi <= 0 {
 			dpi = DefaultRenderDPI
 		}
-		if h.limits.MaxRenderDPI > 0 && dpi > h.limits.MaxRenderDPI {
-			dpi = h.limits.MaxRenderDPI
+		if h.renderLimits.MaxRenderDPI > 0 && dpi > h.renderLimits.MaxRenderDPI {
+			dpi = h.renderLimits.MaxRenderDPI
 		}
 		img, err := RenderPageContext(context.Background(), h.r, req.Page, dpi)
 		if err != nil {
 			return ntmediabox.RenderResponse{}, err
 		}
-		rgba := ntmediabox.ToRGBA(img)
-		if rgba == nil {
-			return ntmediabox.RenderResponse{}, errors.New("empty rendered page")
+		rgba, err := checkedWorkerImage(img, req, h.renderLimits)
+		if err != nil {
+			return ntmediabox.RenderResponse{}, err
 		}
 		return ntmediabox.RenderResponse{
 			Page:  req.Page,
