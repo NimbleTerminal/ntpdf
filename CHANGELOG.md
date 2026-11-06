@@ -1,8 +1,11 @@
 # CHANGELOG
 
-## v0.6.1 (unreleased)
+## v0.6.1 (2026-11-06)
 
 - Mount nothing for PDFium's WASI filesystem. Documents arrive as bytes, and go-pdfium's default of mounting `/` made an OS-confined worker (Landlock) fail to start PDFium at `fd_prestat_get` with permission denied; gloss's `--strict` and its Linux tests saw every PDF worker answer EOF.
+- Add fuzz targets for worker metadata round trips, PDF stream filter round trips, and malformed stream decoding across read buffer sizes, bringing the total to ten targets.
+- Discover fuzz targets automatically for `task fuzz` and CI smoke campaigns, preserve CI crash reproducers as artifacts, and document the existing ntfuzz fleet integration.
+- Update the pprof and pflag dependencies and refresh module checksums.
 
 ## v0.6.0 (2026-11-05)
 

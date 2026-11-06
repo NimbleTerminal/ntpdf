@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6
 	nimbleterminal.dev/booba v0.12.1
-	nimbleterminal.dev/ntpdf v0.6.0
+	nimbleterminal.dev/ntpdf v0.6.1
 	nimbleterminal.dev/ntpicture v0.1.5
 )
 
