@@ -189,12 +189,32 @@ task fuzz FUZZTIME=60s FUZZPARALLEL=4        # duration and parallelism per targ
 | Target | Invariant or boundary |
 | --- | --- |
 | `FuzzDecodeWorkerPages` | Accepted metadata respects geometry, text, page/run counts, and configured image/page limits |
+| `FuzzWorkerPagesRoundTrip` | Structured page metadata survives encoding/decoding without loss and tighter page limits reject it |
 | `FuzzSanitizeForTerminal` | Output is valid printable UTF-8 and sanitization is idempotent |
 | `FuzzLayoutRuns` | Host viewport dimensions bound the grid; hostile text and coordinates cannot emit control characters or panic layout |
 | `FuzzCheckedWorkerImage` | Image budgets agree with an arbitrary-precision bounds oracle; rejected images never reach pixel conversion |
 | `FuzzPDFStreamPreflight` | Arbitrary input exercises raw preflight without panic recovery hiding crashes |
 | `FuzzPDFStructuredPreflight` | Rebuilt stream lengths, xref offsets, and compression let mutations reach object streams, xref records, and filter chains |
 | `FuzzPDFXrefBoundaries` | Redirecting a live xref entry into an accepted document's string, comment, or stream is rejected |
+| `FuzzPDFStreamFilterRoundTrip` | ASCIIHex, ASCII85, and literal/repeated RunLength streams decode back to their source bytes |
+| `FuzzPDFStreamFilterChunks` | Malformed ASCIIHex and RunLength streams have bounded expansion and consistent output/errors across read sizes |
+
+`task fuzz` uses `scripts/fuzz.sh` to discover targets in the library and examples
+modules. CI runs the same script for five seconds per target on pushes and pull
+requests and uploads crash reproducers as the `fuzz-crash-corpus` artifact on
+failure; the continuous campaigns are handled by
+[ntfuzz](https://github.com/NimbleTerminal/ntfuzz). The existing `ntpdf` fleet entry
+tracks `https://github.com/NimbleTerminal/ntpdf.git` on `main`, so new native Go
+targets are discovered after they are pushed and the fleet syncs. No ntfuzz
+runtime dependency or registration code is needed in this library.
+
+Inspect project status and crashes at the
+[public dashboard](https://fuzz.nimbleterminal.com) or its
+[projects API](https://fuzz.nimbleterminal.com/api/projects). The public service
+is a read-only snapshot; campaign configuration and crash triage belong to the
+private ntfuzz operator service. Preserve minimized crash inputs in this repo's
+`testdata/fuzz/<target>/` (or `pdfdoc/testdata/fuzz/<target>/`) before fixing the
+failure so both normal tests and future campaigns retain the regression.
 
 For one longer campaign, select an exact target:
 

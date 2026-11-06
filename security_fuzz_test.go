@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode"
@@ -13,6 +14,41 @@ import (
 	"github.com/ledongthuc/pdf"
 	"nimbleterminal.dev/ntmediabox"
 )
+
+// Build valid envelopes so mutations reach the encoder and typed decoder,
+// complementing the arbitrary JSON in FuzzDecodeWorkerPages.
+func FuzzWorkerPagesRoundTrip(f *testing.F) {
+	f.Add("hello", "Helvetica", uint16(612), uint16(792), uint8(1), uint8(0))
+	f.Add("\x1b[2J\u202e", "", uint16(1), uint16(1), uint8(3), uint8(4))
+	f.Fuzz(func(t *testing.T, text, font string, width, height uint16, count, images uint8) {
+		if len(text) > 4096 || len(font) > 4096 || !utf8.ValidString(text) || !utf8.ValidString(font) {
+			t.Skip()
+		}
+		pages := make([]pdfPage, 1+int(count)%8)
+		for i := range pages {
+			pages[i] = pdfPage{
+				media:      mediaBox{0, 0, float64(width) + 1, float64(height) + 1},
+				runs:       []pdf.Text{{X: float64(i), Y: 12, W: 20, FontSize: 12, Font: font, S: text}},
+				imageCount: int(images),
+			}
+		}
+		limits := Limits{MaxPages: len(pages), MaxImagesPerPage: int(images)}
+		data, err := encodeWorkerPages(pages, limits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := decodeWorkerPages(data, limits)
+		if err != nil || !reflect.DeepEqual(got, pages) {
+			t.Fatalf("metadata round trip: %v", err)
+		}
+		if len(pages) > 1 {
+			limits.MaxPages--
+			if _, err := decodeWorkerPages(data, limits); err == nil {
+				t.Fatal("accepted metadata over the page limit")
+			}
+		}
+	})
+}
 
 func FuzzSanitizeForTerminal(f *testing.F) {
 	for _, s := range []string{"plain ✓", "\x1b]52;c;clipboard\x07\x1b[2J\u202e\u2066", "\xff\x80\x00\r\n\t", "a\u2028b\u200bc"} {

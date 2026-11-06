@@ -10,6 +10,30 @@ env:
   GOWORK: 'off'
 
 jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            examples/go.sum
+      - name: Fuzz every native target
+        env:
+          FUZZTIME: 5s
+          FUZZPARALLEL: '2'
+        run: bash scripts/fuzz.sh
+      - name: Preserve fuzz crash reproducers
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crash-corpus
+          path: '**/testdata/fuzz/**'
+          if-no-files-found: ignore
+
   build-test:
     runs-on: ubuntu-latest
     steps:
