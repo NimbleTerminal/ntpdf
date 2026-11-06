@@ -54,6 +54,11 @@ func pdfiumPoolConfig() webassembly.Config {
 		MinIdle:  1,
 		MaxIdle:  1,
 		MaxTotal: 4,
+		// Nothing is mounted for WASI: documents arrive as bytes, and the
+		// backend would otherwise mount / (go-pdfium does so when FSConfig is
+		// nil), which an OS-confined worker cannot open, so PDFium failed to
+		// start at fd_prestat_get under Landlock.
+		FSConfig: wazero.NewFSConfig(),
 		RuntimeConfig: wazero.NewRuntimeConfig().
 			WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
 			WithCloseOnContextDone(true),

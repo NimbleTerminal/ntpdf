@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v0.6.1 (unreleased)
+
+- Mount nothing for PDFium's WASI filesystem. Documents arrive as bytes, and go-pdfium's default of mounting `/` made an OS-confined worker (Landlock) fail to start PDFium at `fd_prestat_get` with permission denied; gloss's `--strict` and its Linux tests saw every PDF worker answer EOF.
+
 ## v0.6.0 (2026-11-05)
 
 - Add `WorkerRendererFactory`, `WorkerConfig`, and worker serving APIs for OS-confined PDF preflight, text extraction, page metadata, and rasterization through ntmediabox. Confinement is opt-in; the default renderer continues to run in the host process.
