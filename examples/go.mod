@@ -7,7 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.0.6
 	nimbleterminal.dev/booba v0.12.1
-	nimbleterminal.dev/ntpdf v0.5.3
+	nimbleterminal.dev/ntpdf v0.6.0
 	nimbleterminal.dev/ntpicture v0.1.5
 )
 
@@ -28,7 +28,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/spf13/pflag v1.1.0 // indirect
 	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/xo/terminfo v1.3.1 // indirect
 	golang.org/x/image v0.47.0 // indirect
