@@ -12,8 +12,8 @@ require (
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/tetratelabs/wazero v1.12.0
-	nimbleterminal.dev/ntmediabox v0.1.0
-	nimbleterminal.dev/ntpicture v0.1.5
+	nimbleterminal.dev/ntmediabox v0.2.0
+	nimbleterminal.dev/ntpicture v0.2.0
 	nimbleterminal.dev/ntshim v0.6.1
 )
 
@@ -36,13 +36,12 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v1.3.1 // indirect
-	golang.org/x/image v0.47.0 // indirect
+	golang.org/x/image v0.48.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
-	golang.org/x/tools v0.52.0 // indirect
-	nimbleterminal.dev/ntconfine v0.1.1 // indirect
-	nimbleterminal.dev/ntconfine/pkg/confine v0.1.0 // indirect
-	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.1.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
+	nimbleterminal.dev/ntconfine v0.2.0 // indirect
+	nimbleterminal.dev/ntconfine/pkg/confine v0.2.0 // indirect
+	nimbleterminal.dev/ntmediabox/pkg/mediabox v0.2.0 // indirect
 )
